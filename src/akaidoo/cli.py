@@ -4,14 +4,14 @@ from typing import List, Optional, Set
 
 import typer
 from manifestoo_core.addons_set import AddonsSet
-from manifestoo_core.core_addons import get_core_addons # is_core_addon no longer used
+from manifestoo_core.core_addons import get_core_addons  # is_core_addon no longer used
 from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
 from manifestoo.addon_sorter import AddonSorterTopological
 from manifestoo.addons_path import AddonsPath as ManifestooAddonsPath
 from manifestoo.addons_selection import AddonsSelection
 from manifestoo.commands.list_depends import list_depends_command
 from manifestoo import echo
-from manifestoo.echo import verbosity # Ensure verbosity is set
+from manifestoo.echo import verbosity  # Ensure verbosity is set
 from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list
 
@@ -20,12 +20,18 @@ try:
     from importlib import metadata
 except ImportError:
     # Fallback for Python < 3.8
-    import importlib_metadata as metadata # type: ignore
+    import importlib_metadata as metadata  # type: ignore
+
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None  # We'll check this later if --clipboard is used
+
 
 try:
     __version__ = metadata.version("akaidoo")
 except metadata.PackageNotFoundError:
-     # Package is not installed (e.g., running from source)
+    # Package is not installed (e.g., running from source)
     __version__ = "0.0.0-dev"
 
 
@@ -43,6 +49,7 @@ FRAMEWORK_ADDONS = (
     "http_routing",
 )
 
+
 def is_trivial_init_py(file_path: Path) -> bool:
     """
     Checks if an __init__.py file contains only comments, blank lines,
@@ -56,8 +63,9 @@ def is_trivial_init_py(file_path: Path) -> bool:
                     continue
                 if stripped_line.startswith("#"):  # Skip comments
                     continue
-                if stripped_line.startswith("import ") or \
-                   stripped_line.startswith("from "):  # Allow import statements
+                if stripped_line.startswith("import ") or stripped_line.startswith(
+                    "from "
+                ):  # Allow import statements
                     continue
                 # If we find any other kind of line, it's not trivial
                 return False
@@ -92,6 +100,7 @@ def version_callback(value: bool) -> None:
 
         raise typer.Exit()
 
+
 @app.callback()
 def common(
     ctx: typer.Context,
@@ -103,10 +112,20 @@ def common(
         help="Show the version and exit.",
     ),
     verbose: int = typer.Option(
-        0, "--verbose", "-V", count=True, help="Increase verbosity (can be used multiple times).", show_default=False # Changed -v to -V to avoid clash if -c is ever needed at top level
+        0,
+        "--verbose",
+        "-V",
+        count=True,
+        help="Increase verbosity (can be used multiple times).",
+        show_default=False,  # Changed -v to -V to avoid clash if -c is ever needed at top level
     ),
     quiet: int = typer.Option(
-        0, "--quiet", "-q", count=True, help="Decrease verbosity (can be used multiple times).", show_default=False
+        0,
+        "--quiet",
+        "-q",
+        count=True,
+        help="Decrease verbosity (can be used multiple times).",
+        show_default=False,
     ),
 ):
     """
@@ -116,7 +135,7 @@ def common(
     # manifestoo's echo.py has a global verbosity level.
     # We adjust it here.
     current_verbosity = verbosity
-    #verbosity.set(current_verbosity + verbose - quiet)
+    # verbosity.set(current_verbosity + verbose - quiet)
     # ctx.obj = {} # Not needed for now
 
 
@@ -142,7 +161,7 @@ def list_files(
         show_default=True,
     ),
     addons_path_python: str = typer.Option(
-        sys.executable, # Use current python by default
+        sys.executable,  # Use current python by default
         "--addons-path-python",
         show_default=True,
         metavar="PYTHON",
@@ -151,15 +170,17 @@ def list_files(
             "Defaults to the current Python interpreter."
         ),
     ),
-    odoo_cfg: Optional[Path] = typer.Option( # Renamed variable for clarity, was addons_path_from_odoo_cfg
+    odoo_cfg: Optional[
+        Path
+    ] = typer.Option(  # Renamed variable for clarity, was addons_path_from_odoo_cfg
         None,
-        "-c",             # <<< Added this short option
+        "-c",  # <<< Added this short option
         "--odoo-cfg",
         exists=True,
         file_okay=True,
         dir_okay=False,
         readable=True,
-        resolve_path=True, # Good practice for file paths
+        resolve_path=True,  # Good practice for file paths
         envvar="ODOO_RC",
         help=(
             "Expand addons path by looking into the provided Odoo configuration file. "
@@ -212,6 +233,13 @@ def list_files(
         "-s",
         help="Separator character to use between filenames.",
     ),
+    clipboard: bool = typer.Option(
+        False,
+        "--clipboard",
+        "-x",  # Short for eXtract to clipboard or copy (c is taken by odoo-cfg)
+        help="Copy the content of all found files to the clipboard, each prefixed with its path.",
+        show_default=True,
+    ),
 ) -> None:
     """
     Lists all relevant source files (.py, .xml) for an ADDON_NAME
@@ -221,12 +249,12 @@ def list_files(
     # Note: The verbosity set in the `common` callback will be used by manifestoo's echo
     echo.debug(f"Initial verbosity: {verbosity}")
 
-    m_addons_path = ManifestooAddonsPath() # Renamed to avoid conflict
+    m_addons_path = ManifestooAddonsPath()  # Renamed to avoid conflict
     if addons_path_str:
         m_addons_path.extend_from_addons_path(addons_path_str)
     if addons_path_from_import_odoo:
         m_addons_path.extend_from_import_odoo(addons_path_python)
-    if odoo_cfg: # Use the renamed variable
+    if odoo_cfg:  # Use the renamed variable
         m_addons_path.extend_from_odoo_cfg(odoo_cfg)
 
     if not m_addons_path:
@@ -242,13 +270,14 @@ def list_files(
     addons_set = AddonsSet()
     addons_set.add_from_addons_dirs(m_addons_path)
     if not addons_set:
-        echo.error("No addons found in the specified addons path(s). Please check your paths.")
+        echo.error(
+            "No addons found in the specified addons path(s). Please check your paths."
+        )
         raise typer.Exit(1)
     echo.info(str(addons_set), bold_intro="Found Addons set: ")
 
-
     # Resolve Odoo series
-    final_odoo_series = odoo_series # Use a different variable name
+    final_odoo_series = odoo_series  # Use a different variable name
     if not final_odoo_series:
         detected_odoo_series = detect_from_addons_set(addons_set)
         if len(detected_odoo_series) == 1:
@@ -261,14 +290,15 @@ def list_files(
             )
             # We might still proceed if core addon handling isn't needed
         else:
-             echo.warning(
+            echo.warning(
                 "Could not detect Odoo series. Core addon filtering might not work if enabled."
-             )
-    
+            )
+
     # Ensure odoo_series is set if exclude_core is True
     if exclude_core and not final_odoo_series:
-        ensure_odoo_series(final_odoo_series) # This will exit if final_odoo_series is None
-
+        ensure_odoo_series(
+            final_odoo_series
+        )  # This will exit if final_odoo_series is None
 
     # 2. Use manifestoo to find dependencies
     selection = AddonsSelection({addon_name})
@@ -288,9 +318,9 @@ def list_files(
             addons_selection=selection,
             addons_set=addons_set,
             transitive=True,
-            include_selected=True, # Important: include the base addon itself
+            include_selected=True,  # Important: include the base addon itself
             addon_sorter=sorter,
-            #odoo_series_str=(final_odoo_series.value if final_odoo_series else None), # Pass series if known
+            # odoo_series_str=(final_odoo_series.value if final_odoo_series else None), # Pass series if known
         )
     except CycleErrorExit:
         # Error already printed by manifestoo
@@ -303,19 +333,21 @@ def list_files(
     dependent_addons_list = list(dependent_addons)
     echo.info(
         f"{len(dependent_addons_list)} addons in dependency tree (incl. {addon_name}).",
-        bold=True
+        bold=True,
     )
-    if verbosity >= 2: # manifestoo verbosity levels: 0=normal, 1=verbose, 2=debug
-        echo.info("Dependency list:", nl=False) # Use echo.info for consistency
+    if verbosity >= 2:  # manifestoo verbosity levels: 0=normal, 1=verbose, 2=debug
+        echo.info("Dependency list:", nl=False)  # Use echo.info for consistency
         print_list(dependent_addons_list, ", ")
 
     # 3. Filter core addons if requested
     target_addons: List[str] = []
     core_addons_set: Set[str] = set()
     if exclude_core:
-        assert final_odoo_series is not None # Ensured earlier
+        assert final_odoo_series is not None  # Ensured earlier
         core_addons_set = get_core_addons(final_odoo_series)
-        echo.info(f"Excluding {len(core_addons_set)} core addons for {final_odoo_series}.")
+        echo.info(
+            f"Excluding {len(core_addons_set)} core addons for {final_odoo_series}."
+        )
 
     for dep_name in dependent_addons_list:
         if exclude_core and dep_name in core_addons_set:
@@ -324,9 +356,7 @@ def list_files(
             continue
         target_addons.append(dep_name)
 
-    echo.info(
-        f"Processing {len(target_addons)} addons after filtering.", bold=True
-    )
+    echo.info(f"Processing {len(target_addons)} addons after filtering.", bold=True)
 
     # 4. Find files within the target addons' paths
     found_files: List[Path] = []
@@ -334,10 +364,12 @@ def list_files(
     for addon_to_scan in target_addons:
         addon = addons_set.get(addon_to_scan)
         if not addon:
-            echo.warning(f"Addon '{addon_to_scan}' metadata not found, skipping file scan.")
+            echo.warning(
+                f"Addon '{addon_to_scan}' metadata not found, skipping file scan."
+            )
             continue
 
-        addon_dir = addon.path.resolve() # Resolve to absolute path
+        addon_dir = addon.path.resolve()  # Resolve to absolute path
         processed_addons_count += 1
         echo.debug(f"Scanning {addon_dir} for {addon_to_scan}...")
 
@@ -354,26 +386,31 @@ def list_files(
             if include_views:
                 scan_roots.append("views")
             if include_wizards:
-                 scan_roots.extend(["wizard", "wizards"])
+                scan_roots.extend(["wizard", "wizards"])
             # Also scan root for __init__.py, etc. if models are included or no specific parts are targetted
             if not scan_roots or include_models:
-                 scan_roots.append(".") # Representing the root
+                scan_roots.append(".")  # Representing the root
 
         # Determine file extensions to look for
         extensions: List[str] = []
         if include_models or only_models:
-            if ".py" not in extensions: extensions.append(".py")
+            if ".py" not in extensions:
+                extensions.append(".py")
         if include_views or only_views or include_wizards:
-            if ".xml" not in extensions: extensions.append(".xml")
-        
+            if ".xml" not in extensions:
+                extensions.append(".xml")
+
         # If no specific types are included/only, default to common files
-        if not extensions: # e.g. --no-include-models --no-include-views --no-include-wizards
-            echo.debug(f"No specific file types selected for {addon_to_scan}, skipping file globbing.")
+        if (
+            not extensions
+        ):  # e.g. --no-include-models --no-include-views --no-include-wizards
+            echo.debug(
+                f"No specific file types selected for {addon_to_scan}, skipping file globbing."
+            )
             continue
 
-
         # Glob for files
-        for root_name in set(scan_roots): # Use set to avoid duplicate scanning
+        for root_name in set(scan_roots):  # Use set to avoid duplicate scanning
             scan_path = addon_dir / root_name if root_name != "." else addon_dir
             if not scan_path.is_dir():
                 echo.debug(f"  Directory {scan_path} does not exist, skipping.")
@@ -382,8 +419,8 @@ def list_files(
             for ext in extensions:
                 # Refined glob patterns
                 files_to_check: List[Path] = []
-                if root_name == ".": # Root of the addon
-                    if ext == ".py": # __init__.py, main.py etc.
+                if root_name == ".":  # Root of the addon
+                    if ext == ".py":  # __init__.py, main.py etc.
                         files_to_check.extend(scan_path.glob("*.py"))
                     # Generally, XML files are not expected at the root for models/views/wizards
                 elif root_name == "models":
@@ -394,12 +431,13 @@ def list_files(
                         files_to_check.extend(scan_path.glob("**/*.xml"))
                 elif root_name in ("wizard", "wizards"):
                     if ext == ".xml":
-                         files_to_check.extend(scan_path.glob("**/*.xml"))
-                else: # Should not happen with current logic, but for safety
+                        files_to_check.extend(scan_path.glob("**/*.xml"))
+                else:  # Should not happen with current logic, but for safety
                     files_to_check.extend(scan_path.glob(f"**/*{ext}"))
 
-
-                echo.debug(f"  Globbing in {scan_path} for *{ext} (specific patterns for subdir type)")
+                echo.debug(
+                    f"  Globbing in {scan_path} for *{ext} (specific patterns for subdir type)"
+                )
                 for found_file in files_to_check:
                     if not found_file.is_file():
                         continue
@@ -408,19 +446,31 @@ def list_files(
                     # This is mainly for when specific --only-X flags are NOT used.
                     # If --only-X is used, we are more strict.
                     relative_path_parts = found_file.relative_to(addon_dir).parts
-                   
-                    is_framework_file = any(f"/addons/{name}/" in str(scan_path) for name in FRAMEWORK_ADDONS)
+
+                    is_framework_file = any(
+                        f"/addons/{name}/" in str(scan_path)
+                        for name in FRAMEWORK_ADDONS
+                    )
 
                     is_model_file = "models" in relative_path_parts and ext == ".py"
                     is_view_file = "views" in relative_path_parts and ext == ".xml"
-                    is_wizard_file = ("wizard" in relative_path_parts or "wizards" in relative_path_parts) and ext == ".xml"
+                    is_wizard_file = (
+                        "wizard" in relative_path_parts
+                        or "wizards" in relative_path_parts
+                    ) and ext == ".xml"
                     # Python files in root (e.g. __init__.py) are often relevant with models
-                    is_root_py_file = len(relative_path_parts) == 1 and relative_path_parts[0].endswith(".py") and root_name == "."
+                    is_root_py_file = (
+                        len(relative_path_parts) == 1
+                        and relative_path_parts[0].endswith(".py")
+                        and root_name == "."
+                    )
 
-
-                    if only_models and not is_model_file: continue
-                    if only_views and not is_view_file: continue
-                    if is_framework_file and exclude_framework: continue
+                    if only_models and not is_model_file:
+                        continue
+                    if only_views and not is_view_file:
+                        continue
+                    if is_framework_file and exclude_framework:
+                        continue
 
                     # If not using 'only' flags, apply 'include' flags
                     if not (only_models or only_views):
@@ -431,12 +481,20 @@ def list_files(
                             file_type_matches_include = True
                         if include_wizards and is_wizard_file:
                             file_type_matches_include = True
-                        
+
                         # If we scanned root '.', and this is not a root py file,
                         # and it's not a model/view/wizard of an included type, skip it.
                         # This prevents picking up random XML/PY files from other subdirs if '.' was scanned.
-                        if root_name == "." and not is_root_py_file and not is_model_file and not is_view_file and not is_wizard_file:
-                            if not file_type_matches_include: # if it's some other file type not explicitly included
+                        if (
+                            root_name == "."
+                            and not is_root_py_file
+                            and not is_model_file
+                            and not is_view_file
+                            and not is_wizard_file
+                        ):
+                            if (
+                                not file_type_matches_include
+                            ):  # if it's some other file type not explicitly included
                                 continue
                         elif not file_type_matches_include:
                             continue
@@ -444,25 +502,61 @@ def list_files(
                     if found_file.name == "__init__.py":
                         # This check is relevant if models are included (as __init__.py are Python files)
                         # or if no specific 'only_' flags are set and include_models is true.
-                        if is_model_file or is_root_py_file: # ensure it would have been included based on type
+                        if (
+                            is_model_file or is_root_py_file
+                        ):  # ensure it would have been included based on type
                             if is_trivial_init_py(found_file):
-                                echo.debug(f"  Skipping trivial __init__.py: {found_file}")
-                                continue # Skip this file
-
+                                echo.debug(
+                                    f"  Skipping trivial __init__.py: {found_file}"
+                                )
+                                continue  # Skip this file
 
                     # Avoid adding duplicates if scanning "." and specific dirs might overlap
                     # (though refined globbing should reduce this)
                     abs_file_path = found_file.resolve()
                     if abs_file_path not in found_files:
-                         found_files.append(abs_file_path)
-
+                        found_files.append(abs_file_path)
 
     echo.info(
-        f"Found {len(found_files)} files in {processed_addons_count} scanned addons.", bold=True
+        f"Found {len(found_files)} files in {processed_addons_count} scanned addons.",
+        bold=True,
     )
 
-    # 5. Print the results
-    print_list([str(f) for f in sorted(found_files)], separator) # Already resolved
+    # 5. Output the results (print or copy to clipboard)
+    if not found_files:
+        echo.info("No files matched the criteria.")
+        raise typer.Exit()
+
+    sorted_file_paths = sorted(found_files)  # Already resolved Path objects
+
+    if clipboard:
+        if pyperclip is None:
+            echo.error(
+                "The --clipboard (-x) option requires the 'pyperclip' library. "
+                "Please install it (e.g., 'pip install pyperclip') and try again."
+            )
+            echo.info("Printing file paths to console instead as a fallback:")
+            print_list([str(p) for p in sorted_file_paths], separator)
+            raise typer.Exit(1)
+
+        all_content_for_clipboard = []
+        total_size = 0
+        for file_path in sorted_file_paths:
+            try:
+                header = f"# FILEPATH: {file_path}\n"
+                content = file_path.read_text(encoding="utf-8")
+                all_content_for_clipboard.append(header + content)
+                total_size += len(header) + len(content)
+            except Exception as e:
+                echo.warning(f"Could not read file {file_path}: {e}")
+
+        clipboard_text = "\n\n".join(all_content_for_clipboard)
+        pyperclip.copy(clipboard_text)
+        echo.info(
+            f"Content of {len(sorted_file_paths)} files ({total_size / 1024:.2f} KB) copied to clipboard!"
+        )
+    else:
+        print_list([str(p) for p in sorted_file_paths], separator)
 
 
 # Optional: Add a default command or alias if desired
