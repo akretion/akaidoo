@@ -244,7 +244,7 @@ def list_files(
         f"{len(dependent_addons_list)} addons in dependency tree (incl. {addon_name}).",
         bold=True
     )
-    if verbosity.get() > 1: # Debug level
+    if verbosity > 1: # Debug level
         print_list(dependent_addons_list, ", ")
 
     # 3. Filter core addons if requested

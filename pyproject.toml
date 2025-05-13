@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akaidoo"
+version = "0.1.0"
+description = "List files from Odoo addon dependencies using manifestoo."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"} # Or choose your preferred license, e.g., "LGPL-3.0-or-later"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: MIT License", # Match the license field
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "manifestoo-core>=1.0.0", # Use appropriate version constraint
+    "manifestoo",     # Use appropriate version constraint
+    "typer[all]>=0.9.0",
+]
+
+[project.scripts]
+akaidoo = "akaidoo.cli:app"
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/akaidoo" # Replace with your actual URL
+"Bug Tracker" = "https://github.com/yourusername/akaidoo/issues" # Replace
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
