@@ -40,3 +40,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+# In your pyproject.toml
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+]
