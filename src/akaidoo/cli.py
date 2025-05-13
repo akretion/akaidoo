@@ -233,6 +233,15 @@ def list_files(
         "-s",
         help="Separator character to use between filenames.",
     ),
+    output_file: Optional[Path] = typer.Option(
+        None,
+        "--output-file",
+        "-o",
+        help="File path to write the output to. If provided, content will be written here instead of stdout or clipboard.",
+        writable=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
     clipboard: bool = typer.Option(
         False,
         "--clipboard",
@@ -529,6 +538,11 @@ def list_files(
 
     sorted_file_paths = sorted(found_files)  # Already resolved Path objects
 
+    if output_file and clipboard:
+        echo.error("Cannot use --output-file (-o) and --clipboard (-x) simultaneously.")
+        echo.info("Please choose one output method.")
+        raise typer.Exit(1)
+
     if clipboard:
         if pyperclip is None:
             echo.error(
@@ -555,6 +569,33 @@ def list_files(
         echo.info(
             f"Content of {len(sorted_file_paths)} files ({total_size / 1024:.2f} KB) copied to clipboard!"
         )
+
+    elif output_file:
+        echo.info(
+            f"Writing content of {len(sorted_file_paths)} files to {output_file}..."
+        )
+        total_size = 0
+        try:
+            with output_file.open("w", encoding="utf-8") as f:
+                for i, file_path in enumerate(sorted_file_paths):
+                    try:
+                        header = f"# FILEPATH: {file_path}\n"
+                        content = file_path.read_text(encoding="utf-8")
+                        f.write(header)
+                        f.write(content)
+                        f.write("\n\n")  # Separator between files
+                        total_size += len(header) + len(content) + 2
+                        if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0:
+                            echo.info(
+                                f"  Written {i+1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)..."
+                            )
+                    except Exception as e:
+                        echo.warning(f"Could not read or write file {file_path}: {e}")
+            echo.info(f"Successfully wrote {total_size / 1024:.2f} KB to {output_file}")
+        except Exception as e:
+            echo.error(f"Error writing to output file {output_file}: {e}")
+            raise typer.Exit(1)
+
     else:
         print_list([str(p) for p in sorted_file_paths], separator)
 
