@@ -43,6 +43,30 @@ FRAMEWORK_ADDONS = (
     "http_routing",
 )
 
+def is_trivial_init_py(file_path: Path) -> bool:
+    """
+    Checks if an __init__.py file contains only comments, blank lines,
+    or import statements.
+    """
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                stripped_line = line.strip()
+                if not stripped_line:  # Skip blank lines
+                    continue
+                if stripped_line.startswith("#"):  # Skip comments
+                    continue
+                if stripped_line.startswith("import ") or \
+                   stripped_line.startswith("from "):  # Allow import statements
+                    continue
+                # If we find any other kind of line, it's not trivial
+                return False
+        # If we went through all lines and found only trivial content
+        return True
+    except Exception:
+        # In case of reading errors, assume it's not trivial to be safe
+        return False
+
 
 app = typer.Typer(
     help="List files from Odoo addon dependencies using manifestoo.",
@@ -416,6 +440,14 @@ def list_files(
                                 continue
                         elif not file_type_matches_include:
                             continue
+
+                    if found_file.name == "__init__.py":
+                        # This check is relevant if models are included (as __init__.py are Python files)
+                        # or if no specific 'only_' flags are set and include_models is true.
+                        if is_model_file or is_root_py_file: # ensure it would have been included based on type
+                            if is_trivial_init_py(found_file):
+                                echo.debug(f"  Skipping trivial __init__.py: {found_file}")
+                                continue # Skip this file
 
 
                     # Avoid adding duplicates if scanning "." and specific dirs might overlap
