@@ -227,7 +227,7 @@ def list_files(
     ),
     exclude_framework: bool = typer.Option(
         True,
-        "--exclude_framework/--no-exclude-framework",
+        "--exclude-framework/--no-exclude-framework",
         help=f"Exclude {FRAMEWORK_ADDONS} from Odoo base addon",
     ),
     separator: str = typer.Option(
@@ -272,7 +272,7 @@ def list_files(
     only_target_addon: bool = typer.Option(
         False,
         "--only-target-addon",
-        "-s",
+        "-l",
         help="Only list files from the addon directly passed as argument (ignore dependencies for file listing).",
         show_default=False,
     ),
