@@ -269,6 +269,13 @@ def list_files(
             "This option is only used if --edit is active."
         ),
     ),
+    only_target_addon: bool = typer.Option(
+        False,
+        "--only-target-addon",
+        "-s",
+        help="Only list files from the addon directly passed as argument (ignore dependencies for file listing).",
+        show_default=False,
+    ),
 ) -> None:
     """
     Lists all relevant source files (.py, .xml) for an ADDON_NAME
@@ -368,8 +375,9 @@ def list_files(
         echo.info("Dependency list:", nl=False)  # Use echo.info for consistency
         print_list(dependent_addons_list, ", ")
 
-    # 3. Filter core addons if requested
-    target_addons: List[str] = []
+    # 3. Determine the final list of addons to scan based on filters
+    intermediate_target_addons: List[str] = []
+
     core_addons_set: Set[str] = set()
     if exclude_core:
         assert final_odoo_series is not None  # Ensured earlier
@@ -383,9 +391,33 @@ def list_files(
             if verbosity >= 1:
                 echo.info(f"Excluding core addon: {dep_name}")
             continue
-        target_addons.append(dep_name)
+        #        target_addons.append(dep_name)
 
-    echo.info(f"Processing {len(target_addons)} addons after filtering.", bold=True)
+        #    echo.info(f"Processing {len(target_addons)} addons after filtering.", bold=True)
+
+        # TODO: A similar block for exclude_framework could be added here if
+        # it's determined by addon name rather than file path.
+        intermediate_target_addons.append(dep_name)
+
+    target_addons: List[str]
+    if only_target_addon:
+        if addon_name in intermediate_target_addons:
+            target_addons = [addon_name]
+            echo.info(f"Focusing only on the target addon: {addon_name}", bold=True)
+        else:
+            # This implies addon_name itself was filtered out by a previous step (e.g., --exclude-core)
+            target_addons = []
+            echo.warning(
+                f"Target addon '{addon_name}' was excluded by other filters (e.g., --exclude-core). "
+                "No files will be processed from it."
+            )
+    else:
+        target_addons = intermediate_target_addons
+
+    echo.info(
+        f"Will scan files from {len(target_addons)} addons after all filters.",
+        bold=True,
+    )
 
     # 4. Find files within the target addons' paths
     found_files: List[Path] = []
@@ -620,7 +652,7 @@ def list_files(
             echo.error(f"Failed to execute editor command: {e}")
             raise typer.Exit(1)
         raise typer.Exit()  # Successfully launched editor, so exit.
-    elif clipboard:
+    elif clipboard and output_file:
         echo.error("Cannot use --output-file (-o) and --clipboard (-x) simultaneously.")
         echo.info("Please choose one output method.")
         raise typer.Exit(1)
