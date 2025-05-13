@@ -1,77 +1,127 @@
-<img src="assets/akaidoo.png" alt="Logo" width="400"/>
+<p align="center">
+  <img src="assets/akaidoo.png" alt="Akaidoo Logo" width="300"/>
+</p>
 
-# Akaidoo
+<h1 align="center">Akaidoo</h1>
 
-<!-- [![Github-CI][github-ci]][github-link] -->
-<!-- [![Coverage Status][codecov-badge]][codecov-link] -->
-<!-- TODO: Replace with actual links once published and CI is set up -->
+<p align="center">
+  <!-- TODO: Uncomment and update badges once set up -->
+  <!-- <a href="YOUR_GITHUB_ACTIONS_LINK"><img src="YOUR_GITHUB_ACTIONS_BADGE_SVG" alt="Build Status"></a> -->
+  <!-- <a href="YOUR_CODECOV_LINK"><img src="YOUR_CODECOV_BADGE_SVG" alt="Coverage Status"></a> -->
+  <a href="https://pypi.org/project/akaidoo/"><img src="https://img.shields.io/pypi/v/akaidoo.svg" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/akaidoo/"><img src="https://img.shields.io/pypi/pyversions/akaidoo.svg" alt="Python versions"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/pypi/l/akaidoo.svg" alt="License"></a>
+</p>
 
-<!--- shortdesc-begin -->
+<p align="center">
+  <i>Navigate the Odoo & OCA Maze: Instantly Gather Relevant Addon Files.</i>
+</p>
 
-A Python CLI package extending the [manifestoo](https://github.com/acsone/manifestoo) CLI to list all relevant source files from an Odoo addon and its entire dependency tree. Ideal for focused code browsing, context gathering for AI tools, or targeted analysis.
+---
 
-<!--- shortdesc-end -->
+**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards) from a specific Odoo addon and its *entire* dependency tree. It's designed to streamline your development workflow by quickly providing the focused context you need.
 
-## Why Akaidoo?
+## The "Why" of Akaidoo
 
-The Odoo source code and the vast OCA ecosystem comprise millions of lines of code across hundreds of repositories. When working on a specific module, your focus is typically on that module and its direct and transitive dependencies – usually a manageable set of 20-30 modules.
+The Odoo framework and the extensive OCA (Odoo Community Association) ecosystem represent a colossal codebase – millions of lines spread across hundreds of repositories. When you're deep in development or debugging a particular module, you're typically concerned with that module and its direct or indirect dependencies. This usually boils down to a manageable set (e.g., 10-50 modules), not the entire universe.
 
-Akaidoo helps you quickly identify and gather all the relevant Python and XML files from this dependency set, making it easier to:
+Akaidoo bridges this gap by helping you:
 
-*   Load relevant context into your code editor.
-*   Feed the necessary source code to AI-powered development tools (like Cursor, Avante in Neovim, or Copilot).
-*   Perform targeted searches or static analysis.
-*   Understand the scope of changes for a given addon.
+*   🔍 **Focus Your View:** Instantly see only the files relevant to your current task.
+*   🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub Copilot, Cursor, or Neovim's Avante for more accurate suggestions.
+*   📝 **Streamline Editing:** Open all pertinent files in your editor with a single command.
+*   🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
+*   🛠️ **Target Analysis:** Perform searches or static analysis on a well-defined subset of code.
 
-Akaidoo leverages `manifestoo` for its robust addon discovery and dependency resolution capabilities.
+## Key Features
+
+*   **Deep Dependency Traversal:** Leverages `manifestoo` to accurately resolve all direct and transitive dependencies.
+*   **Intelligent File Collection:** Gathers `.py` (models, root files) and `.xml` (views, wizards) from the identified addons.
+*   **Flexible Addon Discovery:**
+    *   Use Odoo configuration files (`-c, --odoo-cfg`).
+    *   Specify addon paths directly (`--addons-path`).
+    *   Auto-detect from an importable `odoo` package.
+*   **Granular Filtering:**
+    *   Include/exclude specific file types (models, views, wizards).
+    *   Focus *only* on models, views, or wizards.
+    *   Exclude Odoo core addons (`--exclude-core`) or common framework addons (`--exclude-framework`).
+    *   Intelligently skip trivial `__init__.py` files.
+*   **Versatile Output Modes:**
+    *   **List Paths:** Print file paths to `stdout` (default).
+    *   **To Clipboard:** Copy the *content* of all found files to your clipboard (`-x, --clipboard`), each prefixed with its relative path – perfect for AI prompts!
+    *   **To File:** Dump all file contents into a single output file (`-o, --output-file`).
+    *   **To Editor:** Directly open all found files in your preferred editor (`-e, --edit`).
 
 ## Installation
 
 <!--- install-begin -->
-
-Using [pipx](https://pypi.org/project/pipx/) (recommended):
+The recommended way to install Akaidoo is using [pipx](https://pypi.org/project/pipx/) (to install it in an isolated environment):
 
 ```console
 pipx install akaidoo
 ```
 
-## Features
+For clipboard functionality (-x):
+Akaidoo uses pyperclip. You might need to install it and its dependencies:
 
-Akaidoo provides one main command, list-files, with various options:
-
-- Dependency Resolution: Uses manifestoo to find all direct and transitive dependencies of a specified Odoo addon.
-- File Collection: Gathers all relevant files (Python models, XML views, XML wizards) from the target addon and its dependencies.
-- Flexible Addons Path Configuration:
-    - Specify addons paths directly (--addons-path).
-    - Automatically use paths from an odoo.conf file (-c, --odoo-cfg).
-    - Discover paths from an importable odoo package.
-- Filtering:
-    - Include/exclude models, views, and wizard files (--[no-]include-models, etc.).
-    - Focus only on models, views, or wizards (--only-models, etc.).
-    - Exclude Odoo core addons (--exclude-core).
-    - Skip trivial __init__.py files (those with only comments/imports).
-- Multiple Output Modes:
-    - List paths to stdout (default).
-    - Copy file contents to the system clipboard (-x, --clipboard), each prefixed with its path.
-    - Write file contents to a specified output file (-o, --output-file), each prefixed with its path.
-    - Open files directly in your preferred editor (-e, --edit), with configurable editor command (--editor-cmd).
-    - Informative Output: Verbosity controls, clear information about addons processed and files found.
-
-For a full list of commands and options, run akaidoo --help or akaidoo list-files --help.
+```console
+pip install pyperclip
+# On Linux, you may also need:
+# sudo apt-get install xclip  # or xsel
+```
 
 ## Quick Start
 
-Let's assume you have an Odoo project structure and want to list all Python model files for the sale_management addon and its dependencies, excluding core Odoo addons. Your Odoo configuration is in ~/odoo/project.conf.
+Imagine you're working on the sale_timesheet addon in an Odoo project.
 
-1. List relevant Python model file paths from sale_management and its non-core dependencies:
-
-```console
-akaidoo list-files sale_management -c ~/odoo/project.conf --only-models
-```
-
- 2. Open all view and wizard XML files for account in Neovim:
-
+1. Get all relevant file paths for sale_timesheet and its dependencies:
+(Using your project's Odoo configuration file)
 
 ```console
-akaidoo list-files account -c ~/odoo/project.conf --only-models -e nvim
+akaidoo list-files sale_timesheet -c ~/path/to/your/odoo.conf
 ```
+    
+
+2. Copy all Python model code for sale_timesheet (and its deps) to your clipboard for an AI prompt:
+      
+```console
+akaidoo list-files sale_timesheet -c odoo.conf --only-models -x
+```
+
+(Each file's content in the clipboard will be prefixed with # FILEPATH: path/to/file.py)
+
+
+3. Open all Python and XML view files for project and its direct dependencies (excluding core) in Neovim:
+
+```console
+akaidoo list-files project -c odoo.conf --exclude-core --no-include-wizards -e --editor-cmd "nvim -p"
+```
+
+(This uses the nvim -p command to open files in tabs. It's specially handy when using the Avante AI plugin...)
+
+
+4. Get only the files from the mrp addon itself, ignoring its dependencies, and save their content to a file:
+
+```console
+akaidoo list-files mrp -c odoo.conf --only-target-addon -o mrp_context.txt
+```
+
+     
+Exploring All Options:
+For a full list of commands and options, run:
+
+```console
+akaidoo list-files --help
+```
+
+
+## Contributing
+
+Contributions, bug reports, and feature requests are very welcome! Please feel free to open an issue or submit a pull request on the GitHub repository.
+
+
+## License
+
+Akaidoo is licensed under the MIT License.
+
+
