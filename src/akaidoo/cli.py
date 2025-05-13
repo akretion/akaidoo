@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 from typing import List, Optional, Set
+import shlex
+import subprocess
+import os
 
 import typer
 from manifestoo_core.addons_set import AddonsSet
@@ -248,6 +251,23 @@ def list_files(
         "-x",  # Short for eXtract to clipboard or copy (c is taken by odoo-cfg)
         help="Copy the content of all found files to the clipboard, each prefixed with its path.",
         show_default=True,
+    ),
+    edit_in_editor: bool = typer.Option(
+        False,
+        "--edit",
+        "-e",
+        help="Open the found files in an editor.",
+        show_default=False,  # Typically not default
+    ),
+    editor_command_str: Optional[str] = typer.Option(
+        None,
+        "--editor-cmd",
+        help=(
+            "Specify the editor command (e.g., 'code -r' or 'vim'). "
+            "If not provided when --edit is used, it defaults to $VISUAL, then $EDITOR, "
+            "then 'nvim' as a fallback. "
+            "This option is only used if --edit is active."
+        ),
     ),
 ) -> None:
     """
@@ -538,7 +558,69 @@ def list_files(
 
     sorted_file_paths = sorted(found_files)  # Already resolved Path objects
 
-    if output_file and clipboard:
+    # Mutual exclusivity checks for output/action options
+    output_actions_count = sum([edit_in_editor, bool(output_file), clipboard])
+    if output_actions_count > 1:
+        actions = []
+        if edit_in_editor:
+            actions.append("--edit")
+        if output_file:
+            actions.append("--output-file")
+        if clipboard:
+            actions.append("--clipboard")
+        echo.error(
+            f"Please choose only one primary output action from: {', '.join(actions)}."
+        )
+        raise typer.Exit(1)
+
+    if edit_in_editor:
+        if not sorted_file_paths:
+            echo.info("No files found to open in editor.")
+            raise typer.Exit()
+
+        cmd_to_use = editor_command_str
+        if (
+            not cmd_to_use
+        ):  # If --editor-cmd was not provided, try environment variables
+            cmd_to_use = os.environ.get("VISUAL")
+        if not cmd_to_use:
+            cmd_to_use = os.environ.get("EDITOR")
+        if not cmd_to_use:
+            cmd_to_use = "nvim"  # Sensible default
+
+        try:
+            editor_parts = shlex.split(cmd_to_use)
+        except ValueError as e:
+            echo.error(f"Error parsing editor command '{cmd_to_use}': {e}")
+            raise typer.Exit(1)
+
+        if not editor_parts:
+            echo.error(
+                f"Editor command '{cmd_to_use}' is invalid or empty after parsing."
+            )
+            raise typer.Exit(1)
+
+        files_to_open_str = [str(p) for p in sorted_file_paths]
+        full_command = editor_parts + files_to_open_str
+
+        # Use shlex.quote for printing to handle spaces/special chars in command parts correctly
+        printable_command = " ".join(shlex.quote(str(s)) for s in full_command)
+        echo.info(f"Executing: {printable_command}")
+        try:
+            process = subprocess.run(full_command, check=False)  # Let editor take over
+            if process.returncode != 0:
+                echo.warning(f"Editor command exited with status {process.returncode}.")
+        except FileNotFoundError:
+            echo.error(f"Editor command not found: {shlex.quote(editor_parts[0])}")
+            echo.info(
+                "Please ensure it's in your PATH or provide the full path via --editor-cmd."
+            )
+            raise typer.Exit(1)
+        except Exception as e:
+            echo.error(f"Failed to execute editor command: {e}")
+            raise typer.Exit(1)
+        raise typer.Exit()  # Successfully launched editor, so exit.
+    elif clipboard:
         echo.error("Cannot use --output-file (-o) and --clipboard (-x) simultaneously.")
         echo.info("Please choose one output method.")
         raise typer.Exit(1)
