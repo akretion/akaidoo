@@ -51,10 +51,7 @@ def is_trivial_init_py(file_path: Path) -> bool:
     except Exception:
         return False
 
-# No global `app = typer.Typer()` instance here for this pattern.
-# The function itself will define the CLI.
-
-def version_callback_for_run(value: bool): # Must be defined for typer.run
+def version_callback_for_run(value: bool):
     if value:
         m_version = "unknown"; mc_version = "unknown"
         try: m_version = metadata.version("manifestoo")
@@ -66,14 +63,11 @@ def version_callback_for_run(value: bool): # Must be defined for typer.run
         typer.echo(f"manifestoo-core version: {mc_version}")
         raise typer.Exit()
 
-# This function IS the command. Its parameters define the CLI.
 def akaidoo_command_entrypoint(
-    # Main positional argument first
     addon_name: str = typer.Argument(
-        ..., # Required
+        ..., 
         help="The name of the target Odoo addon.",
     ),
-    # Options
     version: Optional[bool] = typer.Option(
         None, "--version", callback=version_callback_for_run, is_eager=True, help="Show the version and exit.", show_default=False
     ),
@@ -101,8 +95,12 @@ def akaidoo_command_entrypoint(
     include_models: bool = typer.Option(True, "--include-models/--no-include-models", help="Include Python model files."),
     include_views: bool = typer.Option(True, "--include-views/--no-include-views", help="Include XML view files."),
     include_wizards: bool = typer.Option(True, "--include-wizards/--no-include-wizards", help="Include XML wizard files."),
+    include_reports: bool = typer.Option( # <<< NEW OPTION
+        True, "--include-reports/--no-include-reports", "-r", help="Include XML report files (from report/ or reports/ subdir)."
+    ),
     only_models: bool = typer.Option(False, "--only-models", help="Only list files under 'models/' directories.", show_default=False),
     only_views: bool = typer.Option(False, "--only-views", help="Only list files under 'views/' directories.", show_default=False),
+    # Consider adding --only-wizards and --only-reports if needed for exclusivity
     exclude_core: bool = typer.Option(False, "--exclude-core/--no-exclude-core", help="Exclude files from Odoo core addons."),
     exclude_framework: bool = typer.Option(True, "--exclude-framework/--no-exclude-framework", help=f"Exclude {FRAMEWORK_ADDONS} framework addons."),
     separator: str = typer.Option("\n", "--separator", "-s", help="Separator character between filenames."),
@@ -112,15 +110,9 @@ def akaidoo_command_entrypoint(
     editor_command_str: Optional[str] = typer.Option(None, "--editor-cmd", help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'."),
     only_target_addon: bool = typer.Option(False, "--only-target-addon", "-l", help="Only list files from the target addon.", show_default=False),
 ):
-    """
-    Akaidoo: Lists relevant source files from an Odoo addon and its dependency tree.
-    ADDON_NAME is the name of the target Odoo addon.
-    """
-    # Set verbosity
     manifestoo_echo_module.verbosity = manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
 
-    # ... (The rest of your logic exactly as it was in akaidoo_main_cmd)
     m_addons_path = ManifestooAddonsPath()
     if addons_path_str: m_addons_path.extend_from_addons_path(addons_path_str)
     if addons_path_from_import_odoo: m_addons_path.extend_from_import_odoo(addons_path_python)
@@ -195,22 +187,37 @@ def akaidoo_command_entrypoint(
         addon_dir = addon.path.resolve()
         processed_addons_count += 1
         echo.debug(f"Scanning {addon_dir} for {addon_to_scan}...")
+        
         scan_roots: List[str] = []
-        if only_models: scan_roots.append("models")
-        elif only_views: scan_roots.append("views")
+        # Handle 'only_' flags first as they are exclusive
+        if only_models:
+            scan_roots.append("models")
+        elif only_views:
+            scan_roots.append("views")
+        # Add elif for only_wizards and only_reports if you implement them
         else:
+            # Default: scan based on include flags
             if include_models: scan_roots.append("models")
             if include_views: scan_roots.append("views")
             if include_wizards: scan_roots.extend(["wizard", "wizards"])
-            if not scan_roots or include_models: scan_roots.append(".")
+            if include_reports: scan_roots.extend(["report", "reports"]) # <<< NEW
+            if not scan_roots or include_models: # Always include root if models are generally needed or nothing else is
+                scan_roots.append(".")
+
         extensions: List[str] = []
         if include_models or only_models: extensions.append(".py")
-        if include_views or only_views or include_wizards: extensions.append(".xml")
-        extensions = list(set(extensions))
+        # Wizards, Views, and Reports are typically XML
+        if include_views or only_views or include_wizards or include_reports:
+            if ".xml" not in extensions:
+                 extensions.append(".xml")
+        # Deduplicate, though append logic already handles it for .xml
+        extensions = list(set(extensions)) 
+
         if not extensions:
             echo.debug(f"No specific file types for {addon_to_scan}, skipping globbing.")
             continue
-        for root_name in set(scan_roots):
+
+        for root_name in set(scan_roots): # Use set to avoid duplicate scanning
             scan_path_dir = addon_dir / root_name if root_name != "." else addon_dir
             if not scan_path_dir.is_dir(): continue
             for ext in extensions:
@@ -223,30 +230,45 @@ def akaidoo_command_entrypoint(
                     if ext == ".xml": files_to_check.extend(scan_path_dir.glob("**/*.xml"))
                 elif root_name in ("wizard", "wizards"):
                     if ext == ".xml": files_to_check.extend(scan_path_dir.glob("**/*.xml"))
+                elif root_name in ("report", "reports"): # <<< NEW
+                    if ext == ".xml": files_to_check.extend(scan_path_dir.glob("**/*.xml"))
+                
                 for found_file in files_to_check:
                     if not found_file.is_file(): continue
+                    
                     relative_path_parts = found_file.relative_to(addon_dir).parts
                     is_framework_file = any(f"/addons/{name}/" in str(found_file.resolve()) for name in FRAMEWORK_ADDONS)
+                    
                     is_model_file = "models" in relative_path_parts and ext == ".py"
                     is_view_file = "views" in relative_path_parts and ext == ".xml"
                     is_wizard_file = ("wizard" in relative_path_parts or "wizards" in relative_path_parts) and ext == ".xml"
+                    is_report_file = ("report" in relative_path_parts or "reports" in relative_path_parts) and ext == ".xml" # <<< NEW
                     is_root_py_file = len(relative_path_parts) == 1 and relative_path_parts[0].endswith(".py") and root_name == "."
+
                     if only_models and not is_model_file: continue
                     if only_views and not is_view_file: continue
+                    # Add only_wizards and only_reports checks here if implemented
+
                     if is_framework_file and exclude_framework:
                         if manifestoo_echo_module.verbosity >= 1: echo.info(f"Excluding framework file: {found_file}")
                         continue
-                    if not (only_models or only_views):
+                    
+                    # If not using 'only_' flags, apply 'include_' flags
+                    if not (only_models or only_views): # Add other 'only_' flags if they exist
                         file_type_matches_include = False
                         if include_models and (is_model_file or is_root_py_file): file_type_matches_include = True
                         if include_views and is_view_file: file_type_matches_include = True
                         if include_wizards and is_wizard_file: file_type_matches_include = True
-                        if root_name == "." and not is_root_py_file and not (is_model_file or is_view_file or is_wizard_file):
+                        if include_reports and is_report_file: file_type_matches_include = True # <<< NEW
+                        
+                        if root_name == "." and not is_root_py_file and not (is_model_file or is_view_file or is_wizard_file or is_report_file):
                             if not file_type_matches_include: continue
                         elif not file_type_matches_include: continue
+                    
                     if found_file.name == "__init__.py" and (is_model_file or is_root_py_file) and is_trivial_init_py(found_file):
                         echo.debug(f"  Skipping trivial __init__.py: {found_file}")
                         continue
+                    
                     abs_file_path = found_file.resolve()
                     if abs_file_path not in found_files: found_files.append(abs_file_path)
 
@@ -315,10 +337,6 @@ def akaidoo_command_entrypoint(
         print_list([str(p) for p in sorted_file_paths], separator)
 
 def cli_entry_point():
-    """
-    This function is the designated entry point for the console script.
-    It calls typer.run() on the main command function.
-    """
     typer.run(akaidoo_command_entrypoint)
 
 if __name__ == "__main__":
