@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import os
 
-import typer
+import typer # Only typer
 from manifestoo_core.addons_set import AddonsSet
 from manifestoo_core.core_addons import get_core_addons
 from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
@@ -14,7 +14,7 @@ from manifestoo.addons_path import AddonsPath as ManifestooAddonsPath
 from manifestoo.addons_selection import AddonsSelection
 from manifestoo.commands.list_depends import list_depends_command
 from manifestoo import echo
-from manifestoo.echo import verbosity
+import manifestoo.echo as manifestoo_echo_module # Import the module itself
 from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list
 
@@ -51,14 +51,10 @@ def is_trivial_init_py(file_path: Path) -> bool:
     except Exception:
         return False
 
-app = typer.Typer(
-    help="Akaidoo: Lists relevant source files from an Odoo addon and its dependency tree.",
-    context_settings={"help_option_names": ["-h", "--help"]},
-    add_completion=False,
-    # REMOVED: no_args_is_help=True, # We'll handle this explicitly if needed
-)
+# No global `app = typer.Typer()` instance here for this pattern.
+# The function itself will define the CLI.
 
-def version_callback(value: bool) -> None:
+def version_callback_for_run(value: bool): # Must be defined for typer.run
     if value:
         m_version = "unknown"; mc_version = "unknown"
         try: m_version = metadata.version("manifestoo")
@@ -70,27 +66,28 @@ def version_callback(value: bool) -> None:
         typer.echo(f"manifestoo-core version: {mc_version}")
         raise typer.Exit()
 
-@app.callback(invoke_without_command=True)
-def akaidoo_main_cmd(
-    ctx: typer.Context,
+# This function IS the command. Its parameters define the CLI.
+def akaidoo_command_entrypoint(
+    # Main positional argument first
     addon_name: str = typer.Argument(
-        ..., # Ellipsis means it's required.
+        ..., # Required
         help="The name of the target Odoo addon.",
     ),
+    # Options
     version: Optional[bool] = typer.Option(
-        None, "--version", callback=version_callback, is_eager=True, help="Show the version and exit.", show_default=False
+        None, "--version", callback=version_callback_for_run, is_eager=True, help="Show the version and exit.", show_default=False
     ),
-    verbose: int = typer.Option(
+    verbose_level_count: int = typer.Option(
         0, "--verbose", "-V", count=True, help="Increase verbosity (can be used multiple times).", show_default=False
     ),
-    quiet: int = typer.Option(
+    quiet_level_count: int = typer.Option(
         0, "--quiet", "-q", count=True, help="Decrease verbosity (can be used multiple times).", show_default=False
     ),
     addons_path_str: Optional[str] = typer.Option(
         None, "--addons-path", help="Comma-separated list of directories to add to the addons path.", show_default=False
     ),
     addons_path_from_import_odoo: bool = typer.Option(
-        True, help="Expand addons path by trying to `import odoo` and looking at `odoo.addons.__path__`.", show_default=True
+        True, "--addons-path-from-import-odoo/--no-addons-path-from-import-odoo", help="Expand addons path by trying to `import odoo` and looking at `odoo.addons.__path__`.", show_default=True
     ),
     addons_path_python: str = typer.Option(
         sys.executable, "--addons-path-python", show_default=True, metavar="PYTHON", help="The python executable for importing `odoo.addons.__path__`."
@@ -104,8 +101,8 @@ def akaidoo_main_cmd(
     include_models: bool = typer.Option(True, "--include-models/--no-include-models", help="Include Python model files."),
     include_views: bool = typer.Option(True, "--include-views/--no-include-views", help="Include XML view files."),
     include_wizards: bool = typer.Option(True, "--include-wizards/--no-include-wizards", help="Include XML wizard files."),
-    only_models: bool = typer.Option(False, "--only-models", help="Only list files under 'models/' directories.", show_default=False),
-    only_views: bool = typer.Option(False, "--only-views", help="Only list files under 'views/' directories.", show_default=False),
+    only_models: bool = typer.Option(False, "--only-models", "-m", help="Only list files under 'models/' directories.", show_default=False),
+    only_views: bool = typer.Option(False, "--only-views", "-v", help="Only list files under 'views/' directories.", show_default=False),
     exclude_core: bool = typer.Option(False, "--exclude-core/--no-exclude-core", help="Exclude files from Odoo core addons."),
     exclude_framework: bool = typer.Option(True, "--exclude-framework/--no-exclude-framework", help=f"Exclude {FRAMEWORK_ADDONS} framework addons."),
     separator: str = typer.Option("\n", "--separator", "-s", help="Separator character between filenames."),
@@ -115,19 +112,15 @@ def akaidoo_main_cmd(
     editor_command_str: Optional[str] = typer.Option(None, "--editor-cmd", help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'."),
     only_target_addon: bool = typer.Option(False, "--only-target-addon", "-l", help="Only list files from the target addon.", show_default=False),
 ):
-    if ctx.invoked_subcommand: # If a (future) subcommand was called, do nothing here.
-        return
+    """
+    Akaidoo: Lists relevant source files from an Odoo addon and its dependency tree.
+    ADDON_NAME is the name of the target Odoo addon.
+    """
+    # Set verbosity
+    manifestoo_echo_module.verbosity = manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
+    echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
 
-    # If --version was called, version_callback already exited.
-    # addon_name is required by Typer due to `...`, so if we reach here, it was provided.
-    # If it was not, Typer would have shown an error and exited.
-    # So, we don't need an explicit check for `if not addon_name:` here.
-
-    # new_level = verbosity.get() + verbose - quiet
-    # verbosity.set(new_level)
-    echo.debug(f"Effective verbosity: {verbosity}")
-
-    # ... (rest of your existing logic) ...
+    # ... (The rest of your logic exactly as it was in akaidoo_main_cmd)
     m_addons_path = ManifestooAddonsPath()
     if addons_path_str: m_addons_path.extend_from_addons_path(addons_path_str)
     if addons_path_from_import_odoo: m_addons_path.extend_from_import_odoo(addons_path_python)
@@ -167,7 +160,7 @@ def akaidoo_main_cmd(
 
     dependent_addons_list = list(dependent_addons)
     echo.info(f"{len(dependent_addons_list)} addons in dependency tree (incl. {addon_name}).", bold=True)
-    if verbosity >= 2: print_list(dependent_addons_list, ", ", intro="Dependency list: ")
+    if manifestoo_echo_module.verbosity >= 2: print_list(dependent_addons_list, ", ", intro="Dependency list: ")
 
     intermediate_target_addons: List[str] = []
     if exclude_core:
@@ -176,7 +169,7 @@ def akaidoo_main_cmd(
         echo.info(f"Excluding {len(core_addons_set)} core addons for {final_odoo_series}.")
         for dep_name in dependent_addons_list:
             if dep_name not in core_addons_set: intermediate_target_addons.append(dep_name)
-            elif verbosity >= 1: echo.info(f"Excluding core addon: {dep_name}")
+            elif manifestoo_echo_module.verbosity >= 1: echo.info(f"Excluding core addon: {dep_name}")
     else:
         intermediate_target_addons = dependent_addons_list
 
@@ -241,7 +234,7 @@ def akaidoo_main_cmd(
                     if only_models and not is_model_file: continue
                     if only_views and not is_view_file: continue
                     if is_framework_file and exclude_framework:
-                        if verbosity >= 1: echo.info(f"Excluding framework file: {found_file}")
+                        if manifestoo_echo_module.verbosity >= 1: echo.info(f"Excluding framework file: {found_file}")
                         continue
                     if not (only_models or only_views):
                         file_type_matches_include = False
@@ -312,7 +305,7 @@ def akaidoo_main_cmd(
                         header = f"# FILEPATH: {file_path}\n"
                         content = file_path.read_text(encoding="utf-8")
                         f.write(header + content + "\n\n")
-                        total_.size += len(header) + len(content) + 2 # Typo fixed
+                        total_size += len(header) + len(content) + 2
                         if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0: echo.info(f"  Written {i+1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)...")
                     except Exception as e:
                         echo.warning(f"Could not read or write file {file_path}: {e}")
@@ -321,5 +314,12 @@ def akaidoo_main_cmd(
     else:
         print_list([str(p) for p in sorted_file_paths], separator)
 
+def cli_entry_point():
+    """
+    This function is the designated entry point for the console script.
+    It calls typer.run() on the main command function.
+    """
+    typer.run(akaidoo_command_entrypoint)
+
 if __name__ == "__main__":
-    app()
+    cli_entry_point()
