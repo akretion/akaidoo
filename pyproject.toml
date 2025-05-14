@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-akaidoo = "akaidoo.cli:app"
+akaidoo = "akaidoo.cli:cli_entry_point"
 
 [project.urls]
 "Homepage" = "https://github.com/yourusername/akaidoo" # Replace with your actual URL
