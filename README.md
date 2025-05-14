@@ -19,31 +19,33 @@
 
 ---
 
-**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards) from a specific Odoo addon and its *entire* dependency tree. It's designed to streamline your development workflow by quickly providing the focused context you need.
+**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards, reports, and even OpenUpgrade migration scripts) from a specific Odoo addon and its *entire* dependency tree. It's designed to streamline your development workflow by quickly providing the focused context you need.
 
 ## The "Why" of Akaidoo
 
-The Odoo framework and the extensive OCA (Odoo Community Association) ecosystem represent a colossal codebase – millions of lines spread across hundreds of repositories. When you're deep in development or debugging a particular module, you're typically concerned with that module and its direct or indirect dependencies. This usually boils down to a manageable set (e.g., 10-50 modules), not the entire universe.
+The Odoo framework and the extensive OCA (Odoo Community Association) ecosystem represent a colossal codebase – millions of lines spread across hundreds of repositories. When you're deep in development, debugging, or planning a migration for a particular module, you're typically concerned with that module and its direct or indirect dependencies. This usually boils down to a manageable set (e.g., 10-50 modules), not the entire universe.
 
 Akaidoo bridges this gap by helping you:
 
 *   🔍 **Focus Your View:** Instantly see only the files relevant to your current task.
-*   🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub Copilot, Cursor, or Neovim's Avante for more accurate suggestions.
+*   🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub Copilot, Cursor, or Neovim's Avante for more accurate suggestions, especially powerful when including OpenUpgrade scripts for migration tasks.
 *   📝 **Streamline Editing:** Open all pertinent files in your editor with a single command.
 *   🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
 *   🛠️ **Target Analysis:** Perform searches or static analysis on a well-defined subset of code.
+*   🚀 **Accelerate Migrations:** Gather module code, dependencies, and their corresponding OpenUpgrade migration scripts in one go.
 
 ## Key Features
 
 *   **Deep Dependency Traversal:** Leverages `manifestoo` to accurately resolve all direct and transitive dependencies.
-*   **Intelligent File Collection:** Gathers `.py` (models, root files) and `.xml` (views, wizards) from the identified addons.
+*   **Intelligent File Collection:** Gathers `.py` (models, root files) and `.xml` (views, wizards, reports) from the identified addons.
+*   **OpenUpgrade Script Integration:** Optionally include all migration scripts from a specified OpenUpgrade repository for the target addon and its dependencies (`-u, --openupgrade`).
 *   **Flexible Addon Discovery:**
     *   Use Odoo configuration files (`-c, --odoo-cfg`).
     *   Specify addon paths directly (`--addons-path`).
     *   Auto-detect from an importable `odoo` package.
 *   **Granular Filtering:**
-    *   Include/exclude specific file types (models, views, wizards).
-    *   Focus *only* on models, views, or wizards.
+    *   Include/exclude specific file types (models, views, wizards, reports).
+    *   Focus *only* on models or views.
     *   Exclude Odoo core addons (`--exclude-core`) or common framework addons (`--exclude-framework`).
     *   Intelligently skip trivial `__init__.py` files.
 *   **Versatile Output Modes:**
@@ -61,67 +63,64 @@ The recommended way to install Akaidoo is using [pipx](https://pypi.org/project/
 pipx install akaidoo
 ```
 
-For clipboard functionality (-x):
-Akaidoo uses pyperclip. You might need to install it and its dependencies:
+Alternatively, using pip:
+```console
+pip install --user akaidoo
+```
 
+For clipboard functionality (`-x`):
+Akaidoo uses `pyperclip`. You might need to install it and its dependencies:
 ```console
 pip install pyperclip
 # On Linux, you may also need:
 # sudo apt-get install xclip  # or xsel
 ```
+<!--- install-end -->
 
 ## Quick Start
 
-Imagine you're working on the sale_timesheet addon in an Odoo project.
+Imagine you're working on the `sale_timesheet` addon in an Odoo project.
 
-1. Get all relevant file paths for sale_timesheet and its dependencies:
-(Using your project's Odoo configuration file)
-
+1.  **Get all relevant file paths for `sale_timesheet` and its dependencies:**
+    (Using your project's Odoo configuration file)
 ```console
-akaidoo list-files sale_timesheet -c ~/path/to/your/odoo.conf
-```
-    
-
-2. Copy all Python model code for sale_timesheet (and its deps) to your clipboard for an AI prompt:
-      
-```console
-akaidoo list-files sale_timesheet -c odoo.conf --only-models -x
+akaidoo sale_timesheet -c ~/path/to/your/odoo.conf
 ```
 
-(Each file's content in the clipboard will be prefixed with # FILEPATH: path/to/file.py)
-
-
-3. Open all Python and XML view files for project and its direct dependencies (excluding core) in Neovim:
-
+2.  **Copy all Python model code for `sale_timesheet` (and its deps) to your clipboard for an AI prompt:**
 ```console
-akaidoo list-files project -c odoo.conf --exclude-core --no-include-wizards -e --editor-cmd "nvim -p"
+akaidoo sale_timesheet -c odoo.conf --only-models -x
+```
+    *(Each file's content in the clipboard will be prefixed with `# FILEPATH: path/to/file.py`)*
+
+3.  **Open all Python and XML view files for `project` and its direct dependencies (excluding core) in Neovim:**
+```console
+akaidoo project -c odoo.conf --exclude-core --no-include-wizards --no-include-reports -e --editor-cmd "nvim -p"
+```
+    *(This uses the `nvim -p` command to open files in tabs. It's especially handy when using AI plugins like Avante.)*
+
+4.  **Get only the files from the `mrp` addon itself, ignoring its dependencies, and save their content to a file:**
+```console
+akaidoo mrp -c odoo.conf --only-target-addon -o mrp_context.txt
 ```
 
-(This uses the nvim -p command to open files in tabs. It's specially handy when using the Avante AI plugin...)
-
-
-4. Get only the files from the mrp addon itself, ignoring its dependencies, and save their content to a file:
-
+5.  **Gather `sale_stock` files, its dependencies, AND its OpenUpgrade migration scripts:**
+    (Assuming your OpenUpgrade clone is at `~/OpenUpgrade`)
 ```console
-akaidoo list-files mrp -c odoo.conf --only-target-addon -o mrp_context.txt
+akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o sale_stock_migration_context.txt 
 ```
+    This will collect all standard module files for `sale_stock` and its dependencies, plus all files from `~/OpenUpgrade/openupgrade_scripts/scripts/sale_stock/`, `~/OpenUpgrade/openupgrade_scripts/scripts/ADDON_DEPENDENCY_1/`, etc., into `sale_stock_migration_context.txt`. This is powerful for feeding comprehensive context to an AI for migration tasks.
 
-     
-Exploring All Options:
-For a full list of commands and options, run:
-
+**Exploring All Options:**
+For a full list of options:
 ```console
-akaidoo list-files --help
+akaidoo --help
 ```
-
 
 ## Contributing
 
 Contributions, bug reports, and feature requests are very welcome! Please feel free to open an issue or submit a pull request on the GitHub repository.
 
-
 ## License
 
 Akaidoo is licensed under the MIT License.
-
-
