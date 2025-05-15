@@ -27,7 +27,7 @@ Akaidoo bridges this gap by helping you:
 *   🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub Copilot, Cursor, or Neovim's Avante for more accurate suggestions, especially powerful when including OpenUpgrade scripts for migration tasks.
 *   📝 **Streamline Editing:** Open all pertinent files in your editor with a single command.
 *   🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
-*   🛠️ **Target Analysis:** Perform searches (akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit") or static analysis on a well-defined subset of code.
+*   🛠️ **Target Analysis:** Perform searches (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`) or static analysis on a well-defined subset of code.
 *   🚀 **Accelerate Migrations:** Gather module code, dependencies, and their corresponding OpenUpgrade migration scripts in one go.
 
 ## Key Features
