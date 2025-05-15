@@ -19,11 +19,7 @@
 
 ---
 
-**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards, reports, and even OpenUpgrade migration scripts) from a specific Odoo addon and its *entire* dependency tree. It's designed to streamline your development workflow by quickly providing the focused context you need.
-
-## The "Why" of Akaidoo
-
-The Odoo framework and the extensive OCA (Odoo Community Association) ecosystem represent a colossal codebase – millions of lines spread across hundreds of repositories. When you're deep in development, debugging, or planning a migration for a particular module, you're typically concerned with that module and its direct or indirect dependencies. This usually boils down to a manageable set (e.g., 10-50 modules), not the entire universe.
+**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards, reports, and even OpenUpgrade migration scripts) from a specific Odoo addon and its *entire* dependency tree (usually only 10-30 modules) across the millions of lines of the Odoo and OCA addons in your addons_paths. It's designed to streamline your development workflow by quickly providing the focused context you need, for AI LLM's for instance.
 
 Akaidoo bridges this gap by helping you:
 
@@ -31,7 +27,7 @@ Akaidoo bridges this gap by helping you:
 *   🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub Copilot, Cursor, or Neovim's Avante for more accurate suggestions, especially powerful when including OpenUpgrade scripts for migration tasks.
 *   📝 **Streamline Editing:** Open all pertinent files in your editor with a single command.
 *   🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
-*   🛠️ **Target Analysis:** Perform searches or static analysis on a well-defined subset of code.
+*   🛠️ **Target Analysis:** Perform searches (akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit") or static analysis on a well-defined subset of code.
 *   🚀 **Accelerate Migrations:** Gather module code, dependencies, and their corresponding OpenUpgrade migration scripts in one go.
 
 ## Key Features
@@ -93,13 +89,13 @@ akaidoo sale_timesheet -c odoo.conf --only-models -x
 ```
     *(Each file's content in the clipboard will be prefixed with `# FILEPATH: path/to/file.py`)*
 
-3.  **Open all Python and XML view files for `project` and its direct dependencies (excluding core) in Neovim:**
+3.  **Open all Python and XML view files for `project` and its direct dependencies (excluding core) in Neovim (use --editor-cmd or EDITOR env var to specify a different editor):**
 ```console
-akaidoo project -c odoo.conf --exclude-core --no-include-wizards --no-include-reports -e --editor-cmd "nvim -p"
+akaidoo project -c odoo.conf --exclude-core --no-include-wizards --no-include-reports -e
 ```
     *(This uses the `nvim -p` command to open files in tabs. It's especially handy when using AI plugins like Avante.)*
 
-4.  **Get only the files from the `mrp` addon itself, ignoring its dependencies, and save their content to a file:**
+4.  **Get only the files from the `mrp` addon itself, ignoring its dependencies, and save their content to a file (useful if you outgrow the clipboard size):**
 ```console
 akaidoo mrp -c odoo.conf --only-target-addon -o mrp_context.txt
 ```
