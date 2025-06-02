@@ -14,12 +14,12 @@
 </p>
 
 <p align="center">
-  <i>Navigate the Odoo & OCA Maze: Instantly Gather Relevant Addon Files.</i>
+  <i>Navigate the Odoo & OCA Maze: Instantly Gather Relevant Modules Files.</i>
 </p>
 
 ---
 
-**Akaidoo** extends the powerful [manifestoo](https://github.com/acsone/manifestoo) CLI to pinpoint and list all relevant source files (Python models, XML views, wizards, reports, and even OpenUpgrade migration scripts) from a specific Odoo addon and its *entire* dependency tree (usually only 10-30 modules) across the millions of lines of the Odoo and OCA addons in your addons_paths. It's designed to streamline your development workflow by quickly providing the focused context you need, for AI LLM's for instance.
+**Akaidoo** extends the [manifestoo](https://github.com/acsone/manifestoo) CLI to list and copy all relevant source files (Python models, XML views, wizards, reports, and even OpenUpgrade migration scripts) from a specific Odoo addon and its *entire* dependency tree. It's designed to streamline your development workflow by quickly providing the focused context you need; for AI LLMs for instance.
 
 Akaidoo bridges this gap by helping you:
 
@@ -106,6 +106,14 @@ akaidoo mrp -c odoo.conf --only-target-addon -o mrp_context.txt
 akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o sale_stock_migration_context.txt 
 ```
     This will collect all standard module files for `sale_stock` and its dependencies, plus all files from `~/OpenUpgrade/openupgrade_scripts/scripts/sale_stock/`, `~/OpenUpgrade/openupgrade_scripts/scripts/ADDON_DEPENDENCY_1/`, etc., into `sale_stock_migration_context.txt`. This is powerful for feeding comprehensive context to an AI for migration tasks.
+
+6.  Gather the files from any source directory:
+```console
+akaidoo some_directory
+```
+    If some_directory is not an Odoo addon, then for convenience, akaidoo will select all the files from some_directory (recursively) and copy their content to the clipboard (-x) or to a file (-o) according to the options. It will skip hidden files and __pycache__.
+
+
 
 **Exploring All Options:**
 For a full list of options:

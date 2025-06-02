@@ -63,10 +63,84 @@ def version_callback_for_run(value: bool):
         typer.echo(f"manifestoo-core version: {mc_version}")
         raise typer.Exit()
 
+def process_and_output_files(
+    files_to_process: List[Path],
+    output_file_opt: Optional[Path],
+    clipboard_opt: bool,
+    edit_in_editor_opt: bool,
+    editor_command_str_opt: Optional[str],
+    separator_char: str,
+):
+    """Helper function to handle the output of found files."""
+    if not files_to_process:
+        echo.info("No files matched the criteria.")
+        raise typer.Exit()
+
+    sorted_file_paths = sorted(files_to_process)
+
+    output_actions_count = sum([edit_in_editor_opt, bool(output_file_opt), clipboard_opt])
+    if output_actions_count > 1:
+        actions = [name for flag, name in [(edit_in_editor_opt, "--edit"), (output_file_opt, "--output-file"), (clipboard_opt, "--clipboard")] if flag]
+        echo.error(f"Please choose only one primary output action from: {', '.join(actions)}.")
+        raise typer.Exit(1)
+
+    if edit_in_editor_opt:
+        cmd_to_use = editor_command_str_opt or os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nvim"
+        try: editor_parts = shlex.split(cmd_to_use)
+        except ValueError as e: echo.error(f"Error parsing editor command '{cmd_to_use}': {e}"); raise typer.Exit(1)
+        if not editor_parts: echo.error(f"Editor command '{cmd_to_use}' invalid."); raise typer.Exit(1)
+        full_command = editor_parts + [str(p) for p in sorted_file_paths]
+        echo.info(f"Executing: {' '.join(shlex.quote(str(s)) for s in full_command)}")
+        try:
+            process = subprocess.run(full_command, check=False)
+            if process.returncode != 0: echo.warning(f"Editor exited with status {process.returncode}.")
+        except FileNotFoundError: echo.error(f"Editor command not found: {shlex.quote(editor_parts[0])}"); raise typer.Exit(1)
+        except Exception as e: echo.error(f"Failed to execute editor: {e}"); raise typer.Exit(1)
+    elif clipboard_opt:
+        if pyperclip is None:
+            echo.error("Clipboard requires 'pyperclip'. Install it and try again.")
+            if not output_file_opt: print_list([str(p) for p in sorted_file_paths], separator_char, intro="Fallback: File paths:")
+            raise typer.Exit(1)
+        all_content_for_clipboard = []
+        for fp in sorted_file_paths:
+            try:
+                header = f"# FILEPATH: {fp.resolve()}\n" # Ensure absolute path for clarity
+                content = fp.read_text(encoding='utf-8')
+                all_content_for_clipboard.append(header + content)
+            except Exception as e:
+                echo.warning(f"Could not read file {fp} for clipboard: {e}")
+        clipboard_text = "\n\n".join(all_content_for_clipboard)
+        try:
+            pyperclip.copy(clipboard_text)
+            echo.info(f"Content of {len(sorted_file_paths)} files ({len(clipboard_text) / 1024:.2f} KB) copied to clipboard.")
+        except Exception as e: # Catch pyperclip specific errors
+            echo.error(f"Clipboard operation failed: {e}")
+            if not output_file_opt: print_list([str(p) for p in sorted_file_paths], separator_char, intro="Fallback: File paths:")
+            raise typer.Exit(1)
+    elif output_file_opt:
+        echo.info(f"Writing content of {len(sorted_file_paths)} files to {output_file_opt}...")
+        total_size = 0
+        try:
+            with output_file_opt.open("w", encoding="utf-8") as f:
+                for i, file_path in enumerate(sorted_file_paths):
+                    try:
+                        header = f"# FILEPATH: {file_path.resolve()}\n" # Ensure absolute path
+                        content = file_path.read_text(encoding="utf-8")
+                        f.write(header + content + "\n\n")
+                        total_size += len(header) + len(content) + 2
+                        if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0: echo.info(f"  Written {i+1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)...")
+                    except Exception as e:
+                        echo.warning(f"Could not read or write file {file_path}: {e}")
+            echo.info(f"Successfully wrote {total_size / 1024:.2f} KB to {output_file_opt}")
+        except Exception as e: echo.error(f"Error writing to {output_file_opt}: {e}"); raise typer.Exit(1)
+    else: # Default: print paths
+        print_list([str(p.resolve()) for p in sorted_file_paths], separator_char)
+
+
 def akaidoo_command_entrypoint(
     addon_name: str = typer.Argument(
         ...,
-        help="The name of the target Odoo addon.",
+        help="The name of the target Odoo addon, or a path to a directory.",
     ),
     version: Optional[bool] = typer.Option(
         None, "--version", callback=version_callback_for_run, is_eager=True, help="Show the version and exit.", show_default=False
@@ -92,17 +166,9 @@ def akaidoo_command_entrypoint(
     odoo_series: Optional[OdooSeries] = typer.Option(
         None, envvar=["ODOO_VERSION", "ODOO_SERIES"], help="Odoo series to use, if not autodetected.", show_default=False
     ),
-    openupgrade_path: Optional[Path] = typer.Option( # <<< NEW OPTION
-        None,
-        "--openupgrade",
-        "-u",
-        help="Path to the OpenUpgrade clone. If provided, includes migration scripts.",
-        exists=True, # Ensure the path exists
-        file_okay=False, # It should be a directory
-        dir_okay=True,
-        readable=True,
-        resolve_path=True, # Resolve to absolute path
-        show_default=False,
+    openupgrade_path: Optional[Path] = typer.Option(
+        None, "--openupgrade", "-u", help="Path to the OpenUpgrade clone. If provided, includes migration scripts.",
+        exists=True, file_okay=False, dir_okay=True, readable=True, resolve_path=True, show_default=False,
     ),
     include_models: bool = typer.Option(True, "--include-models/--no-include-models", help="Include Python model files."),
     include_views: bool = typer.Option(True, "--include-views/--no-include-views", help="Include XML view files."),
@@ -124,25 +190,61 @@ def akaidoo_command_entrypoint(
     manifestoo_echo_module.verbosity = manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
 
+    found_files_list: List[Path] = [] # Use a new name for the final list
+
+    # --- Mode 1: Target is a directory path ---
+    potential_path = Path(addon_name)
+    if potential_path.is_dir() and not (potential_path / "__manifest__.py").is_file():
+        echo.info(f"Target '{addon_name}' is a directory. Listing all files recursively.", bold=True)
+        if not potential_path.is_absolute(): # Resolve to absolute if it's relative
+            potential_path = potential_path.resolve()
+            echo.debug(f"Resolved relative path to: {potential_path}")
+
+        for item in potential_path.rglob("*"):
+            if item.is_file():
+                if "__pycache__" in str(item) or "/." in str(item): continue
+                found_files_list.append(item)
+        echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
+        
+        # Process and output these files
+        process_and_output_files(
+            found_files_list,
+            output_file,
+            clipboard,
+            edit_in_editor,
+            editor_command_str,
+            separator
+        )
+        raise typer.Exit() # Done for directory mode
+
+    # --- Mode 2: Target is an Odoo addon name (existing logic) ---
+    echo.info(f"Target '{addon_name}' treated as an Odoo addon name.", bold=True)
+
     m_addons_path = ManifestooAddonsPath()
     if addons_path_str: m_addons_path.extend_from_addons_path(addons_path_str)
     if addons_path_from_import_odoo: m_addons_path.extend_from_import_odoo(addons_path_python)
     if odoo_cfg: m_addons_path.extend_from_odoo_cfg(odoo_cfg)
 
-    if not m_addons_path:
-        echo.error("Could not determine addons path. Please provide one.")
+    if not m_addons_path and not potential_path.is_dir(): # Check again, needed for addon mode
+        echo.error("Could not determine addons path for Odoo mode. Please provide one via --addons-path or --odoo-cfg.")
         raise typer.Exit(1)
-    echo.info(str(m_addons_path), bold_intro="Using Addons path: ")
+    
+    if m_addons_path: # Only print if it was actually populated for addon mode
+        echo.info(str(m_addons_path), bold_intro="Using Addons path: ")
 
     addons_set = AddonsSet()
-    addons_set.add_from_addons_dirs(m_addons_path)
-    if not addons_set:
-        echo.error("No addons found in the specified addons path(s).")
+    if m_addons_path: # Only try to add if addons_path is configured
+        addons_set.add_from_addons_dirs(m_addons_path)
+    
+    if not addons_set and not potential_path.is_dir(): # If still no addons and not in dir mode
+        echo.error("No addons found in the specified addons path(s) for Odoo mode.")
         raise typer.Exit(1)
-    echo.info(str(addons_set), bold_intro="Found Addons set: ")
+    
+    if addons_set: # Only print if addons_set was populated
+        echo.info(str(addons_set), bold_intro="Found Addons set: ")
 
     final_odoo_series = odoo_series
-    if not final_odoo_series:
+    if not final_odoo_series and addons_set: # Series detection needs addons_set
         detected_odoo_series = detect_from_addons_set(addons_set)
         if len(detected_odoo_series) == 1: final_odoo_series = detected_odoo_series.pop()
         elif len(detected_odoo_series) > 1: echo.warning(f"Multiple Odoo series detected: {', '.join(s.value for s in detected_odoo_series)}. Specify with --odoo-series.")
@@ -150,7 +252,7 @@ def akaidoo_command_entrypoint(
     if exclude_core and not final_odoo_series: ensure_odoo_series(final_odoo_series)
 
     if addon_name not in addons_set:
-        echo.error(f"Addon '{addon_name}' not found. Available: {', '.join(sorted(addons_set)) or 'None'}")
+        echo.error(f"Addon '{addon_name}' not found in configured Odoo addons paths. Available: {', '.join(sorted(addons_set)) or 'None'}")
         raise typer.Exit(1)
 
     selection = AddonsSelection({addon_name})
@@ -176,27 +278,29 @@ def akaidoo_command_entrypoint(
     else:
         intermediate_target_addons = dependent_addons_list
 
-    target_addons: List[str]
+    target_addon_names: List[str] # Renamed to avoid confusion
     if only_target_addon:
         if addon_name in intermediate_target_addons:
-            target_addons = [addon_name]
+            target_addon_names = [addon_name]
             echo.info(f"Focusing only on the target addon: {addon_name}", bold=True)
         else:
-            target_addons = []
+            target_addon_names = []
             echo.warning(f"Target addon '{addon_name}' excluded by other filters. No files processed.")
     else:
-        target_addons = intermediate_target_addons
-    echo.info(f"Will scan files from {len(target_addons)} addons after all filters.", bold=True)
+        target_addon_names = intermediate_target_addons
+    echo.info(f"Will scan files from {len(target_addon_names)} Odoo addons after all filters.", bold=True)
 
-    found_files: List[Path] = []
+    # Use found_files_list for collecting files from Odoo addons as well
     processed_addons_count = 0
-    for addon_to_scan_name in target_addons: # Changed to iterate over names first
-        # Scan regular addon files
+    for addon_to_scan_name in target_addon_names:
         addon_meta = addons_set.get(addon_to_scan_name)
         if addon_meta:
             addon_dir = addon_meta.path.resolve()
-            processed_addons_count += 1 # Count only if addon_meta exists for consistency
-            echo.debug(f"Scanning {addon_dir} for {addon_to_scan_name}...")
+            if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
+                found_files_list.append(addon_dir / "__manifest__.py")
+
+            processed_addons_count += 1
+            echo.debug(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
             
             scan_roots: List[str] = []
             if only_models: scan_roots.append("models")
@@ -234,10 +338,9 @@ def akaidoo_command_entrypoint(
                             if ext == ".xml": files_to_check_in_addon.extend(scan_path_dir.glob("**/*.xml"))
                         
                         for found_file in files_to_check_in_addon:
-                            # ... (keep existing filtering logic for these files)
                             if not found_file.is_file(): continue
                             relative_path_parts = found_file.relative_to(addon_dir).parts
-                            is_framework_file = any(f"/addons/{name}/" in str(found_file.resolve()) for name in FRAMEWORK_ADDONS)
+                            is_framework_file = any(f"/addons/{name}/" in str(found_file.resolve()) for name in FRAMEWORK_ADDONS) # Check full path
                             is_model_file = "models" in relative_path_parts and ext == ".py"
                             is_view_file = "views" in relative_path_parts and ext == ".xml"
                             is_wizard_file = ("wizard" in relative_path_parts or "wizards" in relative_path_parts) and ext == ".xml"
@@ -261,92 +364,34 @@ def akaidoo_command_entrypoint(
                                 echo.debug(f"  Skipping trivial __init__.py: {found_file}")
                                 continue
                             abs_file_path = found_file.resolve()
-                            if abs_file_path not in found_files: found_files.append(abs_file_path)
+                            if abs_file_path not in found_files_list: found_files_list.append(abs_file_path)
         else:
-            echo.warning(f"Addon '{addon_to_scan_name}' metadata not found, skipping regular file scan.")
+            echo.warning(f"Odoo Addon '{addon_to_scan_name}' metadata not found, skipping its Odoo file scan.")
 
-        # Scan OpenUpgrade script files if path is provided
         if openupgrade_path:
             ou_scripts_base_path = openupgrade_path / "openupgrade_scripts" / "scripts"
             addon_ou_script_path = ou_scripts_base_path / addon_to_scan_name
-            
             if addon_ou_script_path.is_dir():
                 echo.debug(f"Scanning OpenUpgrade scripts in {addon_ou_script_path} for {addon_to_scan_name}...")
-                # Recursively glob for all files in this directory
-                # No specific filtering by type for migration scripts, get all.
                 for ou_file in addon_ou_script_path.rglob("*"): 
                     if ou_file.is_file():
                         abs_ou_file_path = ou_file.resolve()
-                        if abs_ou_file_path not in found_files:
-                            found_files.append(abs_ou_file_path)
+                        if abs_ou_file_path not in found_files_list:
+                            found_files_list.append(abs_ou_file_path)
                             echo.debug(f"  Added OpenUpgrade script: {abs_ou_file_path}")
             else:
                 echo.debug(f"No OpenUpgrade script directory found for {addon_to_scan_name} at {addon_ou_script_path}")
 
-
-    echo.info(f"Found {len(found_files)} files in {processed_addons_count} addons (and OpenUpgrade scripts if applicable).", bold=True)
-    if not found_files:
-        echo.info("No files matched the criteria.")
-        raise typer.Exit()
-    sorted_file_paths = sorted(found_files)
-
-    output_actions_count = sum([edit_in_editor, bool(output_file), clipboard])
-    if output_actions_count > 1:
-        actions = [name for flag, name in [(edit_in_editor, "--edit"), (output_file, "--output-file"), (clipboard, "--clipboard")] if flag]
-        echo.error(f"Please choose only one primary output action from: {', '.join(actions)}.")
-        raise typer.Exit(1)
-
-    if edit_in_editor:
-        cmd_to_use = editor_command_str or os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nvim"
-        try: editor_parts = shlex.split(cmd_to_use)
-        except ValueError as e: echo.error(f"Error parsing editor command '{cmd_to_use}': {e}"); raise typer.Exit(1)
-        if not editor_parts: echo.error(f"Editor command '{cmd_to_use}' invalid."); raise typer.Exit(1)
-        full_command = editor_parts + [str(p) for p in sorted_file_paths]
-        echo.info(f"Executing: {' '.join(shlex.quote(str(s)) for s in full_command)}")
-        try:
-            process = subprocess.run(full_command, check=False)
-            if process.returncode != 0: echo.warning(f"Editor exited with status {process.returncode}.")
-        except FileNotFoundError: echo.error(f"Editor command not found: {shlex.quote(editor_parts[0])}"); raise typer.Exit(1)
-        except Exception as e: echo.error(f"Failed to execute editor: {e}"); raise typer.Exit(1)
-    elif clipboard:
-        if pyperclip is None:
-            echo.error("Clipboard requires 'pyperclip'. Install it and try again.")
-            if not output_file: print_list([str(p) for p in sorted_file_paths], separator, intro="Fallback: File paths:")
-            raise typer.Exit(1)
-        all_content_for_clipboard = []
-        for fp in sorted_file_paths:
-            try:
-                header = f"# FILEPATH: {fp}\n"
-                content = fp.read_text(encoding='utf-8')
-                all_content_for_clipboard.append(header + content)
-            except Exception as e:
-                echo.warning(f"Could not read file {fp} for clipboard: {e}")
-        clipboard_text = "\n\n".join(all_content_for_clipboard)
-        try:
-            pyperclip.copy(clipboard_text)
-            echo.info(f"Content of {len(sorted_file_paths)} files ({len(clipboard_text) / 1024:.2f} KB) copied to clipboard.")
-        except Exception as e:
-            echo.error(f"Clipboard operation failed: {e}")
-            if not output_file: print_list([str(p) for p in sorted_file_paths], separator, intro="Fallback: File paths:")
-            raise typer.Exit(1)
-    elif output_file:
-        echo.info(f"Writing content of {len(sorted_file_paths)} files to {output_file}...")
-        total_size = 0
-        try:
-            with output_file.open("w", encoding="utf-8") as f:
-                for i, file_path in enumerate(sorted_file_paths):
-                    try:
-                        header = f"# FILEPATH: {file_path}\n"
-                        content = file_path.read_text(encoding="utf-8")
-                        f.write(header + content + "\n\n")
-                        total_size += len(header) + len(content) + 2
-                        if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0: echo.info(f"  Written {i+1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)...")
-                    except Exception as e:
-                        echo.warning(f"Could not read or write file {file_path}: {e}")
-            echo.info(f"Successfully wrote {total_size / 1024:.2f} KB to {output_file}")
-        except Exception as e: echo.error(f"Error writing to {output_file}: {e}"); raise typer.Exit(1)
-    else:
-        print_list([str(p) for p in sorted_file_paths], separator)
+    echo.info(f"Found {len(found_files_list)} total files.", bold=True)
+    
+    process_and_output_files(
+        found_files_list,
+        output_file,
+        clipboard,
+        edit_in_editor,
+        editor_command_str,
+        separator
+    )
 
 def cli_entry_point():
     typer.run(akaidoo_command_entrypoint)
