@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 import os
@@ -17,6 +18,13 @@ except ImportError as e:
         "Skipping CLI tests, akaidoo.cli or akaidoo_command_entrypoint not found",
         allow_module_level=True,
     )
+
+
+def strip_ansi_codes(s: str) -> str:
+    return re.sub(
+        r"\x1b\[([0-9,A-Z]{1,2}(;[0-9]{1,2})?(;[0-9]{3})?)?[m|K|H|f|J]", "", s
+    )
+
 
 runner = CliRunner()
 
@@ -220,17 +228,21 @@ def test_main_help():
     # Invoke help on the test_app
     result = runner.invoke(test_app, ["--help"], prog_name="akaidoo")
     assert result.exit_code == 0
+    stdout_clean = strip_ansi_codes(result.stdout)
+    print(
+        f"DEBUG: Cleaned STDOUT for help test:\n{stdout_clean}"
+    )  # For debugging in CI
     # The Usage string comes from how Typer wraps akaidoo_command_entrypoint
     # Because akaidoo_command_entrypoint is now a command *of* test_app,
     # the help might show "Usage: akaidoo akaidoo_test_cmd [OPTIONS] ADDON_NAME"
     # or similar. Or, if test_app has no other commands, it might be simpler.
     # Let's check for the core parts.
-    assert "Usage: akaidoo" in result.stdout  # It will use prog_name
-    assert "[OPTIONS] ADDON_NAME" in result.stdout  # Key part
+    assert "Usage: akaidoo" in stdout_clean  # It will use prog_name
+    assert "[OPTIONS] ADDON_NAME" in stdout_clean  # Key part
     # The main help might come from test_app's help or the command's docstring.
     # Let's check for options of akaidoo_command_entrypoint:
     # assert "--only-target-addon" in result.stdout
-    assert "-l" in result.stdout
+    assert "-l" in stdout_clean
     if result.stderr_bytes:
         print("STDERR from test_main_help:", result.stderr)
     assert not result.stderr_bytes

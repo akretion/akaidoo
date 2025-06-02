@@ -194,7 +194,7 @@ def process_and_output_files(
                         total_size += len(header) + len(content) + 2
                         if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0:
                             echo.info(
-                                f"  Written {i+1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)..."
+                                f"  Written {i + 1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)..."
                             )
                     except Exception as e:
                         echo.warning(f"Could not read or write file {file_path}: {e}")
@@ -381,7 +381,11 @@ def akaidoo_command_entrypoint(
 
         for item in potential_path.rglob("*"):
             if item.is_file():
-                if "__pycache__" in str(item) or "/." in str(item):
+                if (
+                    "__pycache__" in str(item)
+                    or "/." in str(item)
+                    or ".png" in str(item)
+                ):
                     continue
                 found_files_list.append(item)
         echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
