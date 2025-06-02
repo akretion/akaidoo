@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akaidoo"
-version = "0.1.0"
+dynamic = ["version"]
 description = "List files from Odoo addon dependencies using manifestoo."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -42,9 +42,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
-# In your pyproject.toml
 [project.optional-dependencies]
 test = [
     "pytest",
     "pytest-mock",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "akaidoo.__version__"}
