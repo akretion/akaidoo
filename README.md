@@ -25,7 +25,7 @@ OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_ depen
 tree. It's designed to streamline your development workflow by quickly providing the
 focused context you need; for AI LLMs for instance.
 
-Akaidoo bridges this gap by helping you:
+Akaidoo bridges the AI gap for Odoo by helping you:
 
 - 🔍 **Focus Your View:** Instantly see only the files relevant to your current task.
 - 🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub
