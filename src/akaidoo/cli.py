@@ -515,6 +515,8 @@ def akaidoo_command_entrypoint(
             addon_dir = addon_meta.path.resolve()
             if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
                 found_files_list.append(addon_dir / "__manifest__.py")
+                if (addon_dir / "README.rst").is_file():
+                    found_files_list.append(addon_dir / "README.rst")
 
             processed_addons_count += 1
             echo.debug(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
