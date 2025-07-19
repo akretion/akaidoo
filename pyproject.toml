@@ -27,6 +27,8 @@ dependencies = [
     "manifestoo",     # Use appropriate version constraint
     "typer[all]>=0.9.0",
     "pyperclip",
+    "tree-sitter",
+    "tree-sitter-python",
 ]
 
 [project.scripts]
@@ -46,6 +48,7 @@ pythonpath = ["src"]
 test = [
     "pytest",
     "pytest-mock",
+    "typer[all]",
 ]
 
 [tool.setuptools.dynamic]

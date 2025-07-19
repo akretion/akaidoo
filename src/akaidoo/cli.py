@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 import shlex
 import subprocess
 import os
 
-import typer  # Only typer
+import typer
 from manifestoo_core.addons_set import AddonsSet
 from manifestoo_core.core_addons import get_core_addons
 from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
@@ -14,9 +14,11 @@ from manifestoo.addons_path import AddonsPath as ManifestooAddonsPath
 from manifestoo.addons_selection import AddonsSelection
 from manifestoo.commands.list_depends import list_depends_command
 from manifestoo import echo
-import manifestoo.echo as manifestoo_echo_module  # Import the module itself
+import manifestoo.echo as manifestoo_echo_module
 from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list
+
+from .shrinker import shrink_python_file
 
 try:
     from importlib import metadata
@@ -46,6 +48,8 @@ FRAMEWORK_ADDONS = (
     "base_setup",
     "http_routing",
 )
+
+TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
 
 
 def is_trivial_init_py(file_path: Path) -> bool:
@@ -91,6 +95,7 @@ def process_and_output_files(
     edit_in_editor_opt: bool,
     editor_command_str_opt: Optional[str],
     separator_char: str,
+    shrunken_files_content: Dict[Path, str],
 ):
     """Helper function to handle the output of found files."""
     if not files_to_process:
@@ -160,15 +165,17 @@ def process_and_output_files(
                 header = (
                     f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path for clarity
                 )
-                content = fp.read_text(encoding="utf-8")
+                content = shrunken_files_content.get(
+                    fp.resolve(), fp.read_text(encoding="utf-8")
+                )
                 all_content_for_clipboard.append(header + content)
             except Exception as e:
                 echo.warning(f"Could not read file {fp} for clipboard: {e}")
         clipboard_text = "\n\n".join(all_content_for_clipboard)
         try:
             pyperclip.copy(clipboard_text)
-            echo.info(
-                f"Content of {len(sorted_file_paths)} files ({len(clipboard_text) / 1024:.2f} KB) copied to clipboard."
+            print(
+                f"Content of {len(sorted_file_paths)} files ({len(clipboard_text) / 1024:.2f} KB - {len(clipboard_text) * TOKEN_FACTOR / 1000.0:.0f}k TOKENS) copied to clipboard."
             )
         except Exception as e:  # Catch pyperclip specific errors
             echo.error(f"Clipboard operation failed: {e}")
@@ -189,7 +196,9 @@ def process_and_output_files(
                 for i, file_path in enumerate(sorted_file_paths):
                     try:
                         header = f"# FILEPATH: {file_path.resolve()}\n"  # Ensure absolute path
-                        content = file_path.read_text(encoding="utf-8")
+                        content = shrunken_files_content.get(
+                            file_path.resolve(), file_path.read_text(encoding="utf-8")
+                        )
                         f.write(header + content + "\n\n")
                         total_size += len(header) + len(content) + 2
                         if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0:
@@ -198,8 +207,8 @@ def process_and_output_files(
                             )
                     except Exception as e:
                         echo.warning(f"Could not read or write file {file_path}: {e}")
-            echo.info(
-                f"Successfully wrote {total_size / 1024:.2f} KB to {output_file_opt}"
+            print(
+                f"Successfully wrote {total_size / 1024:.2f} KB - {total_size * TOKEN_FACTOR / 1000.0:.0f}k TOKENS to {output_file_opt}"
             )
         except Exception as e:
             echo.error(f"Error writing to {output_file_opt}: {e}")
@@ -327,7 +336,19 @@ def akaidoo_command_entrypoint(
         help=f"Exclude {FRAMEWORK_ADDONS} framework addons.",
     ),
     separator: str = typer.Option(
-        "\n", "--separator", "-s", help="Separator character between filenames."
+        "\n", "--separator", "-S", help="Separator character between filenames."
+    ),
+    shrink: bool = typer.Option(
+        False,
+        "--shrink",
+        "-s",
+        help="Shrink dependency Python files to essentials (classes, methods, fields).",
+    ),
+    shrink_aggressive: bool = typer.Option(
+        False,
+        "--shrink_aggressive",
+        "-S",
+        help="Shrink dependency Python files to essentials (classes, methods, fields).",
     ),
     output_file: Optional[Path] = typer.Option(
         None,
@@ -366,7 +387,8 @@ def akaidoo_command_entrypoint(
     )
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
 
-    found_files_list: List[Path] = []  # Use a new name for the final list
+    found_files_list: List[Path] = []
+    shrunken_files_content: Dict[Path, str] = {}
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
@@ -375,7 +397,7 @@ def akaidoo_command_entrypoint(
             f"Target '{addon_name}' is a directory. Listing all files recursively.",
             bold=True,
         )
-        if not potential_path.is_absolute():  # Resolve to absolute if it's relative
+        if not potential_path.is_absolute():
             potential_path = potential_path.resolve()
             echo.debug(f"Resolved relative path to: {potential_path}")
 
@@ -390,7 +412,6 @@ def akaidoo_command_entrypoint(
                 found_files_list.append(item)
         echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
 
-        # Process and output these files
         process_and_output_files(
             found_files_list,
             output_file,
@@ -398,8 +419,9 @@ def akaidoo_command_entrypoint(
             edit_in_editor,
             editor_command_str,
             separator,
+            shrunken_files_content,
         )
-        raise typer.Exit()  # Done for directory mode
+        raise typer.Exit()
 
     # --- Mode 2: Target is an Odoo addon name (existing logic) ---
     echo.info(f"Target '{addon_name}' treated as an Odoo addon name.", bold=True)
@@ -412,38 +434,37 @@ def akaidoo_command_entrypoint(
     if odoo_cfg:
         m_addons_path.extend_from_odoo_cfg(odoo_cfg)
 
-    if (
-        not m_addons_path and not potential_path.is_dir()
-    ):  # Check again, needed for addon mode
+    if not m_addons_path and not potential_path.is_dir():
         echo.error(
-            "Could not determine addons path for Odoo mode. Please provide one via --addons-path or --odoo-cfg."
+            "Could not determine addons path for Odoo mode. "
+            "Please provide one via --addons-path or --odoo-cfg."
         )
         raise typer.Exit(1)
 
-    if m_addons_path:  # Only print if it was actually populated for addon mode
+    if m_addons_path:
         echo.info(str(m_addons_path), bold_intro="Using Addons path: ")
 
     addons_set = AddonsSet()
-    if m_addons_path:  # Only try to add if addons_path is configured
+    if m_addons_path:
         addons_set.add_from_addons_dirs(m_addons_path)
 
-    if (
-        not addons_set and not potential_path.is_dir()
-    ):  # If still no addons and not in dir mode
+    if not addons_set and not potential_path.is_dir():
         echo.error("No addons found in the specified addons path(s) for Odoo mode.")
         raise typer.Exit(1)
 
-    if addons_set:  # Only print if addons_set was populated
+    if addons_set:
         echo.info(str(addons_set), bold_intro="Found Addons set: ")
 
     final_odoo_series = odoo_series
-    if not final_odoo_series and addons_set:  # Series detection needs addons_set
+    if not final_odoo_series and addons_set:
         detected_odoo_series = detect_from_addons_set(addons_set)
         if len(detected_odoo_series) == 1:
             final_odoo_series = detected_odoo_series.pop()
         elif len(detected_odoo_series) > 1:
             echo.warning(
-                f"Multiple Odoo series detected: {', '.join(s.value for s in detected_odoo_series)}. Specify with --odoo-series."
+                f"Multiple Odoo series detected: "
+                f"{', '.join(s.value for s in detected_odoo_series)}. "
+                "Specify with --odoo-series."
             )
         else:
             echo.warning("Could not detect Odoo series. Core filtering might not work.")
@@ -452,7 +473,8 @@ def akaidoo_command_entrypoint(
 
     if addon_name not in addons_set:
         echo.error(
-            f"Addon '{addon_name}' not found in configured Odoo addons paths. Available: {', '.join(sorted(addons_set)) or 'None'}"
+            f"Addon '{addon_name}' not found in configured Odoo addons paths. "
+            f"Available: {', '.join(sorted(addons_set)) or 'None'}"
         )
         raise typer.Exit(1)
 
@@ -490,7 +512,7 @@ def akaidoo_command_entrypoint(
     else:
         intermediate_target_addons = dependent_addons_list
 
-    target_addon_names: List[str]  # Renamed to avoid confusion
+    target_addon_names: List[str]
     if only_target_addon:
         if addon_name in intermediate_target_addons:
             target_addon_names = [addon_name]
@@ -498,7 +520,8 @@ def akaidoo_command_entrypoint(
         else:
             target_addon_names = []
             echo.warning(
-                f"Target addon '{addon_name}' excluded by other filters. No files processed."
+                f"Target addon '{addon_name}' excluded by other filters. "
+                "No files processed."
             )
     else:
         target_addon_names = intermediate_target_addons
@@ -507,7 +530,6 @@ def akaidoo_command_entrypoint(
         bold=True,
     )
 
-    # Use found_files_list for collecting files from Odoo addons as well
     processed_addons_count = 0
     for addon_to_scan_name in target_addon_names:
         addon_meta = addons_set.get(addon_to_scan_name)
@@ -547,7 +569,8 @@ def akaidoo_command_entrypoint(
 
             if not current_addon_extensions:
                 echo.debug(
-                    f"No specific file types for regular files in {addon_to_scan_name}, skipping."
+                    f"No specific file types for regular files in {addon_to_scan_name}, "
+                    "skipping."
                 )
             else:
                 for root_name in set(scan_roots):
@@ -593,7 +616,7 @@ def akaidoo_command_entrypoint(
                             is_framework_file = any(
                                 f"/addons/{name}/" in str(found_file.resolve())
                                 for name in FRAMEWORK_ADDONS
-                            )  # Check full path
+                            )
                             is_model_file = (
                                 "models" in relative_path_parts and ext == ".py"
                             )
@@ -658,10 +681,27 @@ def akaidoo_command_entrypoint(
                                 continue
                             abs_file_path = found_file.resolve()
                             if abs_file_path not in found_files_list:
+                                if (
+                                    shrink
+                                    or shrink_aggressive
+                                    and found_file.suffix == ".py"
+                                ):
+                                    if (
+                                        shrink_aggressive
+                                        or addon_to_scan_name != addon_name
+                                    ):
+                                        shrunken_content = shrink_python_file(
+                                            found_file.parts[0]
+                                            + "/".join(found_file.parts[1:])
+                                        )
+                                        shrunken_files_content[abs_file_path] = (
+                                            shrunken_content
+                                        )
                                 found_files_list.append(abs_file_path)
         else:
             echo.warning(
-                f"Odoo Addon '{addon_to_scan_name}' metadata not found, skipping its Odoo file scan."
+                f"Odoo Addon '{addon_to_scan_name}' metadata not found, "
+                "skipping its Odoo file scan."
             )
 
         if openupgrade_path:
@@ -669,7 +709,8 @@ def akaidoo_command_entrypoint(
             addon_ou_script_path = ou_scripts_base_path / addon_to_scan_name
             if addon_ou_script_path.is_dir():
                 echo.debug(
-                    f"Scanning OpenUpgrade scripts in {addon_ou_script_path} for {addon_to_scan_name}..."
+                    f"Scanning OpenUpgrade scripts in {addon_ou_script_path} "
+                    f"for {addon_to_scan_name}..."
                 )
                 for ou_file in addon_ou_script_path.rglob("*"):
                     if ou_file.is_file():
@@ -681,7 +722,8 @@ def akaidoo_command_entrypoint(
                             )
             else:
                 echo.debug(
-                    f"No OpenUpgrade script directory found for {addon_to_scan_name} at {addon_ou_script_path}"
+                    f"No OpenUpgrade script directory found for {addon_to_scan_name} "
+                    f"at {addon_ou_script_path}"
                 )
 
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
@@ -693,6 +735,7 @@ def akaidoo_command_entrypoint(
         edit_in_editor,
         editor_command_str,
         separator,
+        shrunken_files_content,
     )
 
 
