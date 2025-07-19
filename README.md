@@ -26,15 +26,12 @@ tree. It's designed to feed AI LLMs.
 
 Akaidoo bridges the AI gap for Odoo by helping you:
 
-- 🔍 **Focus Your View:** Instantly see only the files relevant to your current task.
 - 🤖 **Boost AI Tools:** Feed precisely the right context to AI LLMs. Works best with Gemini and
   its 1 million tokens context.
 - 📝 **Streamline Editing:** Open all pertinent files in your editor with a single
   command.
 - 🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
-- 🛠️ **Target Analysis:** Perform searches
-  (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`)
-  or static analysis on a well-defined subset of code.
+- 🔍 **Perform searches:** (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`)
 - 🚀 **Accelerate Migrations:** Gather module code, dependencies, and their
   corresponding OpenUpgrade migration scripts in one go.
 
