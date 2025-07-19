@@ -8,16 +8,8 @@ from typer.testing import CliRunner
 import typer  # Import Typer for creating a test app
 
 # Import the specific command function directly from your cli.py
-try:
-    from akaidoo.cli import akaidoo_command_entrypoint
-    from akaidoo.cli import pyperclip as actual_pyperclip_in_cli_module
-except ImportError as e:
-    print(f"DEBUG: Test setup ImportError: {e}")
-    print(f"DEBUG: sys.path is: {sys.path}")
-    pytest.skip(
-        "Skipping CLI tests, akaidoo.cli or akaidoo_command_entrypoint not found",
-        allow_module_level=True,
-    )
+from akaidoo.cli import akaidoo_command_entrypoint
+from akaidoo.cli import pyperclip as actual_pyperclip_in_cli_module
 
 
 def strip_ansi_codes(s: str) -> str:
@@ -159,7 +151,7 @@ def dummy_addons_env(tmp_path_factory):
                     + f", 'depends': ['{framework_addon_name}']}}"
                 )
 
-            addon_a_manifest_path.write_text(addon_a_manifest_content_str)
+            addon_a_manifest_content_str.write_text(addon_a_manifest_content_str)
 
     except Exception as e:
         print(f"Warning: Error processing manifest for addon_a: {e}")
@@ -629,3 +621,48 @@ def test_trivial_init_skipping(dummy_addons_env):
     assert str(addon_b_models_init.resolve()) not in output_full_paths
     assert str(framework_addon_root_init.resolve()) not in output_full_paths
     assert str(framework_addon_models_init.resolve()) not in output_full_paths
+
+
+def test_list_files_shrink_option(dummy_addons_env, mocker):
+    mock_pyperclip_module_patch = mocker.patch("akaidoo.cli.pyperclip", create=True)
+
+    if not hasattr(mock_pyperclip_module_patch, "copy"):
+        mock_pyperclip_module_patch.copy = mocker.Mock()
+
+    args = [
+        "addon_a",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--shrink",
+        "--clipboard",
+        "--no-exclude-framework",
+    ]
+    result = _run_cli(args, expected_exit_code=0)
+
+    if actual_pyperclip_in_cli_module is not None:
+        mock_pyperclip_module_patch.copy.assert_called_once()
+        clipboard_content = mock_pyperclip_module_patch.copy.call_args[0][0]
+
+        # Check that dependency model is shrunken
+        b_model_path = (
+            dummy_addons_env["addon_b_path"] / "models" / "b_model.py"
+        ).resolve()
+        assert f"# FILEPATH: {b_model_path}" in clipboard_content
+        assert "class BModel:" in clipboard_content
+        assert "pass # B's model" not in clipboard_content
+        # assert "pass  # shrunk" in clipboard_content
+
+        # Check that target addon model is NOT shrunken
+        a_model_path = (
+            dummy_addons_env["addon_a_path"] / "models" / "a_model.py"
+        ).resolve()
+        assert f"# FILEPATH: {a_model_path}" in clipboard_content
+        assert "class AModel:" in clipboard_content
+        assert "pass # A's model" in clipboard_content
+        assert "pass  # body shrinked by akaidoo" not in clipboard_content
+
+    elif actual_pyperclip_in_cli_module is None:
+        assert "requires the 'pyperclip' library" in result.processed_stderr
