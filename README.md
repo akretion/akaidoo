@@ -2,7 +2,7 @@
   <img src="assets/akaidoo.png" alt="Akaidoo Logo" width="300"/>
 </p>
 
-<h1 align="center">Akaidoo</h1>
+<h1 align="center">Akaidoo - vibe code your Odoo!</h1>
 
 <p align="center">
   <!-- TODO: Uncomment and update badges once set up -->
@@ -20,17 +20,15 @@
 ---
 
 **Akaidoo** extends the [manifestoo](https://github.com/acsone/manifestoo) CLI to list
-and copy all relevant source files (Python models, XML views, wizards, reports, and even
-OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_ dependency
-tree. It's designed to streamline your development workflow by quickly providing the
-focused context you need; for AI LLMs for instance.
+and copy all relevant source files (Python models, XML views, wizards, data, reports, and
+even OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_ dependency
+tree. It's designed to feed AI LLMs.
 
 Akaidoo bridges the AI gap for Odoo by helping you:
 
 - 🔍 **Focus Your View:** Instantly see only the files relevant to your current task.
-- 🤖 **Boost AI Tools:** Feed precisely the right context to AI assistants like GitHub
-  Copilot, Cursor, or Neovim's Avante for more accurate suggestions, especially powerful
-  when including OpenUpgrade scripts for migration tasks.
+- 🤖 **Boost AI Tools:** Feed precisely the right context to AI LLMs. Works best with Gemini and
+  its 1 million tokens context.
 - 📝 **Streamline Editing:** Open all pertinent files in your editor with a single
   command.
 - 🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
@@ -66,6 +64,9 @@ Akaidoo bridges the AI gap for Odoo by helping you:
   - **To File:** Dump all file contents into a single output file (`-o, --output-file`).
   - **To Editor:** Directly open all found files in your preferred editor
     (`-e, --edit`).
+- **Shrink files to save tokens:**
+  - -s to shrink the Python methods in dependencies
+  - -S to shrink the Python methods everywhere
 
 ## Installation
 
@@ -106,11 +107,11 @@ Imagine you're working on the `sale_timesheet` addon in an Odoo project.
 akaidoo sale_timesheet -c ~/path/to/your/odoo.conf
 ```
 
-2.  **Copy all Python model code for `sale_timesheet` (and its deps) to your clipboard
+2.  **Copy all Python model code for `sale_timesheet` (without its deps -l) to your clipboard
     for an AI prompt:**
 
 ```console
-akaidoo sale_timesheet -c odoo.conf --only-models -x
+akaidoo sale_timesheet -c odoo.conf --only-models -l -x
 ```
 
     *(Each file's content in the clipboard will be prefixed with `# FILEPATH: path/to/file.py`)*
