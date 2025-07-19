@@ -306,10 +306,16 @@ def akaidoo_command_entrypoint(
         True, "--include-wizards/--no-include-wizards", help="Include XML wizard files."
     ),
     include_reports: bool = typer.Option(
-        True,
+        False,
         "--include-reports/--no-include-reports",
         "-r",
         help="Include XML report files (from report/ or reports/ subdir).",
+    ),
+    include_data: bool = typer.Option(
+        False,
+        "--include-data/--no-include-data",
+        "-d",
+        help="Include data files (from data/ subdir).",
     ),
     only_models: bool = typer.Option(
         False,
@@ -537,8 +543,14 @@ def akaidoo_command_entrypoint(
             addon_dir = addon_meta.path.resolve()
             if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
                 found_files_list.append(addon_dir / "__manifest__.py")
-                if (addon_dir / "README.rst").is_file():
-                    found_files_list.append(addon_dir / "README.rst")
+                if (addon_dir / "readme" / "DESCRIPTION.md").is_file():
+                    found_files_list.append(addon_dir / "readme" / "DESCRIPTION.md")
+                elif (addon_dir / "readme" / "DESCRIPTION.rst").is_file():
+                    found_files_list.append(addon_dir / "readme" / "DESCRIPTION.rst")
+                if (addon_dir / "readme" / "USAGE.md").is_file():
+                    found_files_list.append(addon_dir / "readme" / "USAGE.md")
+                elif (addon_dir / "readme" / "USAGE.rst").is_file():
+                    found_files_list.append(addon_dir / "readme" / "USAGE.rst")
 
             processed_addons_count += 1
             echo.debug(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
@@ -546,6 +558,8 @@ def akaidoo_command_entrypoint(
             scan_roots: List[str] = []
             if only_models:
                 scan_roots.append("models")
+                if include_data:
+                    scan_roots.append("data")
             elif only_views:
                 scan_roots.append("views")
             else:
@@ -557,6 +571,8 @@ def akaidoo_command_entrypoint(
                     scan_roots.extend(["wizard", "wizards"])
                 if include_reports:
                     scan_roots.extend(["report", "reports"])
+                if include_data:
+                    scan_roots.append("data")
                 if not scan_roots or include_models:
                     scan_roots.append(".")
 
@@ -606,6 +622,14 @@ def akaidoo_command_entrypoint(
                                 files_to_check_in_addon.extend(
                                     scan_path_dir.glob("**/*.xml")
                                 )
+                        elif root_name == "data":
+                            if ext in (".csv", ".xml"):
+                                files_to_check_in_addon.extend(
+                                    scan_path_dir.glob("**/*.csv")
+                                )
+                                files_to_check_in_addon.extend(
+                                    scan_path_dir.glob("**/*.xml")
+                                )
 
                         for found_file in files_to_check_in_addon:
                             if not found_file.is_file():
@@ -631,12 +655,16 @@ def akaidoo_command_entrypoint(
                                 "report" in relative_path_parts
                                 or "reports" in relative_path_parts
                             ) and ext == ".xml"
+                            is_data_file = ("data" in relative_path_parts) and ext in (
+                                ".csv",
+                                ".xml",
+                            )
                             is_root_py_file = (
                                 len(relative_path_parts) == 1
                                 and relative_path_parts[0].endswith(".py")
                                 and root_name == "."
                             )
-                            if only_models and not is_model_file:
+                            if only_models and not (is_model_file or is_data_file):
                                 continue
                             if only_views and not is_view_file:
                                 continue
@@ -655,6 +683,8 @@ def akaidoo_command_entrypoint(
                                 if include_wizards and is_wizard_file:
                                     file_type_matches_include = True
                                 if include_reports and is_report_file:
+                                    file_type_matches_include = True
+                                if include_data and is_data_file:
                                     file_type_matches_include = True
                                 if (
                                     root_name == "."
