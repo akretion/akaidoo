@@ -20,18 +20,19 @@
 ---
 
 **Akaidoo** extends the [manifestoo](https://github.com/acsone/manifestoo) CLI to list
-and copy all relevant source files (Python models, XML views, wizards, data, reports, and
-even OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_ dependency
-tree. It's designed to feed AI LLMs.
+and copy all relevant source files (Python models, XML views, wizards, data, reports,
+and even OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_
+dependency tree. It's designed to feed AI LLMs.
 
 Akaidoo bridges the AI gap for Odoo by helping you:
 
-- 🤖 **Boost AI Tools:** Feed precisely the right context to AI LLMs. Works best with Gemini and
-  its 1 million tokens context.
+- 🤖 **Boost AI Tools:** Feed precisely the right context to AI LLMs. Works best with
+  Gemini and its 1 million tokens context.
 - 📝 **Streamline Editing:** Open all pertinent files in your editor with a single
   command.
 - 🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
-- 🔍 **Perform searches:** (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`)
+- 🔍 **Perform searches:**
+  (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`)
 - 🚀 **Accelerate Migrations:** Gather module code, dependencies, and their
   corresponding OpenUpgrade migration scripts in one go.
 
@@ -104,8 +105,8 @@ Imagine you're working on the `sale_timesheet` addon in an Odoo project.
 akaidoo sale_timesheet -c ~/path/to/your/odoo.conf
 ```
 
-2.  **Copy all Python model code for `sale_timesheet` (without its deps -l) to your clipboard
-    for an AI prompt:**
+2.  **Copy all Python model code for `sale_timesheet` (without its deps -l) to your
+    clipboard for an AI prompt:**
 
 ```console
 akaidoo sale_timesheet -c odoo.conf --only-models -l -x
