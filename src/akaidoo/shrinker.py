@@ -10,7 +10,7 @@ parser = Parser()
 parser.language = Language(python_language())
 
 
-def shrink_python_file(path: str) -> str:
+def shrink_python_file(path: str, aggressive: bool = False) -> str:
     """
     Shrinks Python code from a file to keep only class/function definitions
     (with decorators), class attributes, and field assignments.
@@ -52,8 +52,8 @@ def shrink_python_file(path: str) -> str:
             stripped_line = line.strip()
             if stripped_line:
                 shrunken_parts.append(f"{indent}{stripped_line}")
-
-        shrunken_parts.append(f"{indent}    pass  # shrunk")
+        if not aggressive:
+            shrunken_parts.append(f"{indent}    pass  # shrunk")
 
     # --- Main Processing Loop ---
     for node in root_node.children:
@@ -78,12 +78,18 @@ def shrink_python_file(path: str) -> str:
                         line_bytes = code_bytes[child.start_byte : child.end_byte]
                         line_text = line_bytes.decode("utf8").strip()
                         shrunken_parts.append(f"    {line_text}")
-                elif child.type in ("function_definition", "decorated_definition"):
+                elif (
+                    child.type in ("function_definition", "decorated_definition")
+                    and not aggressive
+                ):
                     shrunken_parts.append("")
                     process_function(child, indent="    ")
             shrunken_parts.append("")
 
-        elif node.type in ("function_definition", "decorated_definition"):
+        elif (
+            node.type in ("function_definition", "decorated_definition")
+            and not aggressive
+        ):
             process_function(node, indent="")
             shrunken_parts.append("")
 
@@ -113,6 +119,12 @@ def main():
         "input_file", type=str, help="The path to the Python file you want to shrink."
     )
     cli_parser.add_argument(
+        "-S",
+        "--shrink-aggressive",
+        action="store_true",
+        help="Enable aggressive shrinking, removing method bodies entirely.",
+    )
+    cli_parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -121,7 +133,9 @@ def main():
     args = cli_parser.parse_args()
 
     try:
-        shrunken_content = shrink_python_file(args.input_file)
+        shrunken_content = shrink_python_file(
+            args.input_file, aggressive=args.shrink_aggressive
+        )
 
         if args.output:
             # Write to the specified output file
