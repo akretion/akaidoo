@@ -342,7 +342,7 @@ def akaidoo_command_entrypoint(
         help=f"Exclude {FRAMEWORK_ADDONS} framework addons.",
     ),
     separator: str = typer.Option(
-        "\n", "--separator", "-S", help="Separator character between filenames."
+        "\n", "--separator", help="Separator character between filenames."
     ),
     shrink: bool = typer.Option(
         False,
@@ -352,11 +352,12 @@ def akaidoo_command_entrypoint(
     ),
     shrink_aggressive: bool = typer.Option(
         False,
-        "--shrink_aggressive",
+        "--shrink-aggressive",
         "-S",
-        help="Shrink dependency Python files to essentials (classes, methods, fields).",
+        help="Enable aggressive shrinking, removing method bodies entirely.",
     ),
     output_file: Optional[Path] = typer.Option(
+        #        Path("akaidoo.out"),
         None,
         "--output-file",
         "-o",
@@ -411,7 +412,7 @@ def akaidoo_command_entrypoint(
             if item.is_file():
                 if (
                     "__pycache__" in str(item)
-                    or "/." in str(item)
+                    or str(item).replace(str(potential_path), "").startswith("/")
                     or ".png" in str(item)
                 ):
                     continue
@@ -721,8 +722,8 @@ def akaidoo_command_entrypoint(
                                         or addon_to_scan_name != addon_name
                                     ):
                                         shrunken_content = shrink_python_file(
-                                            found_file.parts[0]
-                                            + "/".join(found_file.parts[1:])
+                                            str(found_file),
+                                            aggressive=shrink_aggressive,
                                         )
                                         shrunken_files_content[abs_file_path] = (
                                             shrunken_content
