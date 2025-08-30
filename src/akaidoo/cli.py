@@ -440,6 +440,14 @@ def akaidoo_command_entrypoint(
         m_addons_path.extend_from_import_odoo(addons_path_python)
     if odoo_cfg:
         m_addons_path.extend_from_odoo_cfg(odoo_cfg)
+    elif (
+        os.environ.get("VIRTUAL_ENV")
+        and os.environ["VIRTUAL_ENV"].endswith("odoo")
+        and Path(os.environ["VIRTUAL_ENV"] + ".cfg").is_file()
+    ):
+        m_addons_path.extend_from_odoo_cfg(os.environ["VIRTUAL_ENV"] + ".cfg")
+    elif Path("/etc/odoo.cfg").is_file():
+        m_addons_path.extend_from_odoo_cfg("/etc/odoo.cfg")
 
     if not m_addons_path and not potential_path.is_dir():
         echo.error(
@@ -467,14 +475,14 @@ def akaidoo_command_entrypoint(
         detected_odoo_series = detect_from_addons_set(addons_set)
         if len(detected_odoo_series) == 1:
             final_odoo_series = detected_odoo_series.pop()
-        elif len(detected_odoo_series) > 1:
-            echo.warning(
-                f"Multiple Odoo series detected: "
-                f"{', '.join(s.value for s in detected_odoo_series)}. "
-                "Specify with --odoo-series."
-            )
-        else:
-            echo.warning("Could not detect Odoo series. Core filtering might not work.")
+        # elif len(detected_odoo_series) > 1:
+        #     echo.warning(
+        #         f"Multiple Odoo series detected: "
+        #         f"{', '.join(s.value for s in detected_odoo_series)}. "
+        #         "Specify with --odoo-series."
+        #     )
+        # else:
+        #    echo.warning("Could not detect Odoo series. Core filtering might not work.")
     if exclude_core and not final_odoo_series:
         ensure_odoo_series(final_odoo_series)
 
