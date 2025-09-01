@@ -29,6 +29,7 @@ dependencies = [
     "pyperclip",
     "tree-sitter",
     "tree-sitter-python",
+    "GitPython",
 ]
 
 [project.scripts]
