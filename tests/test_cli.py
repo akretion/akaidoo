@@ -245,6 +245,7 @@ def test_main_help():
 
 
 def test_list_files_basic_addons_path(dummy_addons_env):
+    os.environ["VIRTUAL_ENV"] = "FAKE"  # avoid addons_path conflicts
     args = [
         "addon_a",
         "--addons-path",
