@@ -1,9 +1,11 @@
+import ast
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 import shlex
 import subprocess
 import os
+from git import Repo, InvalidGitRepositoryError
 
 import typer
 from manifestoo_core.addons_set import AddonsSet
@@ -96,6 +98,7 @@ def process_and_output_files(
     editor_command_str_opt: Optional[str],
     separator_char: str,
     shrunken_files_content: Dict[Path, str],
+    diffs: List[str],
 ):
     """Helper function to handle the output of found files."""
     if not files_to_process:
@@ -171,6 +174,9 @@ def process_and_output_files(
                 all_content_for_clipboard.append(header + content)
             except Exception as e:
                 echo.warning(f"Could not read file {fp} for clipboard: {e}")
+        for diff in diffs:
+            all_content_for_clipboard.append(diff)
+
         clipboard_text = "\n\n".join(all_content_for_clipboard)
         try:
             pyperclip.copy(clipboard_text)
@@ -201,12 +207,11 @@ def process_and_output_files(
                         )
                         f.write(header + content + "\n\n")
                         total_size += len(header) + len(content) + 2
-                        if len(sorted_file_paths) > 50 and (i + 1) % 25 == 0:
-                            echo.info(
-                                f"  Written {i + 1}/{len(sorted_file_paths)} files ({total_size / 1024:.2f} KB)..."
-                            )
                     except Exception as e:
                         echo.warning(f"Could not read or write file {file_path}: {e}")
+                for diff in diffs:
+                    f.write(diff)
+                    total_size += len(diff)
             print(
                 f"Successfully wrote {total_size / 1024:.2f} KB - {total_size * TOKEN_FACTOR / 1000.0:.0f}k TOKENS to {output_file_opt}"
             )
@@ -295,6 +300,21 @@ def akaidoo_command_entrypoint(
         readable=True,
         resolve_path=True,
         show_default=False,
+    ),
+    module_diff_path: Optional[Path] = typer.Option(
+        None,
+        "--module-diff",
+        "-D",
+        help="Path to the odoo-module-diff clone. If provided, includes pseudo version diffs",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        show_default=False,
+    ),
+    migration_commits: bool = typer.Option(
+        False, "--migration-commits", help="Include deps migration commits"
     ),
     include_models: bool = typer.Option(
         True, "--include-models/--no-include-models", help="Include Python model files."
@@ -396,6 +416,7 @@ def akaidoo_command_entrypoint(
 
     found_files_list: List[Path] = []
     shrunken_files_content: Dict[Path, str] = {}
+    diffs = []
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
@@ -427,6 +448,7 @@ def akaidoo_command_entrypoint(
             editor_command_str,
             separator,
             shrunken_files_content,
+            diffs,
         )
         raise typer.Exit()
 
@@ -445,8 +467,10 @@ def akaidoo_command_entrypoint(
         and os.environ["VIRTUAL_ENV"].endswith("odoo")
         and Path(os.environ["VIRTUAL_ENV"] + ".cfg").is_file()
     ):
+        echo.debug(f"reading addons_path from {os.environ['VIRTUAL_ENV']}.cfg")
         m_addons_path.extend_from_odoo_cfg(os.environ["VIRTUAL_ENV"] + ".cfg")
     elif Path("/etc/odoo.cfg").is_file():
+        echo.debug("reading addons_path from /etc/odoo.cfg")
         m_addons_path.extend_from_odoo_cfg("/etc/odoo.cfg")
 
     if not m_addons_path and not potential_path.is_dir():
@@ -551,7 +575,19 @@ def akaidoo_command_entrypoint(
         if addon_meta:
             addon_dir = addon_meta.path.resolve()
             if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
-                found_files_list.append(addon_dir / "__manifest__.py")
+                manifest_path = addon_dir / "__manifest__.py"
+                found_files_list.append(manifest_path)
+                if migration_commits and not str(addon_dir).endswith(
+                    f"/addons/{addon_to_scan_name}"
+                ):
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    manifest_dict = ast.literal_eval(content)
+                    serie = manifest_dict.get("version").split(".")[0]
+                    find_pr_commits_after_target(
+                        diffs, addon_dir.parent, addon_to_scan_name, serie
+                    )
+
                 if (addon_dir / "readme" / "DESCRIPTION.md").is_file():
                     found_files_list.append(addon_dir / "readme" / "DESCRIPTION.md")
                 elif (addon_dir / "readme" / "DESCRIPTION.rst").is_file():
@@ -562,7 +598,7 @@ def akaidoo_command_entrypoint(
                     found_files_list.append(addon_dir / "readme" / "USAGE.rst")
 
             processed_addons_count += 1
-            echo.debug(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
+            echo.info(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
 
             scan_roots: List[str] = []
             if only_models:
@@ -604,6 +640,7 @@ def akaidoo_command_entrypoint(
                     )
                     if not scan_path_dir.is_dir():
                         continue
+
                     for ext in current_addon_extensions:
                         files_to_check_in_addon: List[Path] = []
                         if root_name == ".":
@@ -765,6 +802,25 @@ def akaidoo_command_entrypoint(
                     f"at {addon_ou_script_path}"
                 )
 
+        if module_diff_path:
+            addon_diff_path = module_diff_path / addon_to_scan_name
+            if module_diff_path.is_dir():
+                echo.debug(
+                    f"Scanning OpenUpgrade scripts in {addon_diff_path} "
+                    f"for {addon_to_scan_name}..."
+                )
+                for diff_file in addon_diff_path.rglob("*"):
+                    if diff_file.is_file():
+                        abs_diff_file_path = diff_file.resolve()
+                        if abs_diff_file_path not in found_files_list:
+                            found_files_list.append(abs_diff_file_path)
+                            echo.debug(f"  Added pseudo diff: {abs_diff_file_path}")
+            else:
+                echo.debug(
+                    f"No addon diff directory found for {addon_to_scan_name} "
+                    f"at {addon_ou_script_path}"
+                )
+
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
 
     process_and_output_files(
@@ -775,7 +831,91 @@ def akaidoo_command_entrypoint(
         editor_command_str,
         separator,
         shrunken_files_content,
+        diffs,
     )
+
+
+def find_pr_commits_after_target(
+    diffs_list, repo_path, addon, serie, target_message=None
+):
+    if target_message is None:
+        target_message = f" {addon}: Migration to {serie}"
+    try:
+        # Open the repository
+        repo = Repo(repo_path)
+
+        pr_commits = []
+
+        # Find the target commit
+        target_commit = None
+        last_commits = []
+        for commit in repo.iter_commits():
+            last_commits.append(commit)
+            if target_message in commit.message:
+                target_commit = commit
+                break
+
+        if target_commit is None:
+            print(f"no migration found for {addon}")
+            return
+
+        for commit in reversed(last_commits):
+            if len(commit.parents) > 1:
+                # print(f"Found merge commit: {commit.hexsha[:8]} - likely end of PR")
+                break
+            if ": " in commit.message and not commit.message.strip().split(": ")[
+                0
+            ].endswith(addon):
+                break  # for some reason commit is for another module before any merge commit
+            pr_commits.append(commit)
+
+        # Display all commits in the PR
+        print(f"\nFound {len(pr_commits)} commits for {addon} v{serie} migration")
+        for i, commit in enumerate(pr_commits):
+            print(
+                f"{i + 1}. {commit.hexsha[:8]} - {commit.author.name} - {commit.message.splitlines()[0]}"
+            )
+
+        print("\n" + "=" * 80 + "\n")
+
+        # Show diffs for each commit in the PR after the target
+        target_index = next(
+            (
+                i
+                for i, commit in enumerate(pr_commits)
+                if commit.hexsha == target_commit.hexsha
+            ),
+            -1,
+        )
+
+        if target_index == -1:
+            print("Error: Target commit not found in PR commits list")
+            return
+
+        for i in range(target_index + 1, len(pr_commits)):
+            commit = pr_commits[i]
+            if commit.parents:
+                diff = commit.parents[0].diff(commit, create_patch=True)
+                if diff:
+                    for file_diff in diff:
+                        diff_text = f"\nFile: {file_diff.a_path} -> {file_diff.b_path}"
+                        diff_text += f"\nChange type: {file_diff.change_type}"
+                        # Decode diff if it's bytes, otherwise use as is
+                        if isinstance(file_diff.diff, bytes):
+                            diff_text += "\n" + file_diff.diff.decode(
+                                "utf-8", errors="replace"
+                            )
+                        else:
+                            diff_text += "\n" + file_diff.diff
+                    diffs_list.append(diff_text)
+
+    except InvalidGitRepositoryError:
+        print(f"The path '{repo_path}' is not a valid Git repository")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        import traceback
+
+        traceback.print_exc()
 
 
 def cli_entry_point():
