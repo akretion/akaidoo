@@ -1,4 +1,5 @@
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -186,7 +187,8 @@ def process_and_output_files(
                     f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path for clarity
                 )
                 content = shrunken_files_content.get(
-                    fp.resolve(), fp.read_text(encoding="utf-8")
+                    fp.resolve(),
+                    re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
                 )
                 all_content_for_clipboard.append(header + content)
             except Exception as e:
@@ -216,16 +218,21 @@ def process_and_output_files(
         total_size = 0
         try:
             with output_file_opt.open("w", encoding="utf-8") as f:
-                for i, file_path in enumerate(sorted_file_paths):
+                for fp in sorted_file_paths:
                     try:
-                        header = f"# FILEPATH: {file_path.resolve()}\n"  # Ensure absolute path
+                        header = f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path
                         content = shrunken_files_content.get(
-                            file_path.resolve(), file_path.read_text(encoding="utf-8")
+                            fp.resolve(),
+                            re.sub(
+                                r"^(?:#.*\n)+",
+                                "",
+                                fp.read_text(encoding="utf-8"),
+                            ),
                         )
                         f.write(header + content + "\n\n")
                         total_size += len(header) + len(content) + 2
                     except Exception as e:
-                        echo.warning(f"Could not read or write file {file_path}: {e}")
+                        echo.warning(f"Could not read or write file {fp}: {e}")
                 for diff in diffs:
                     f.write(diff)
                     total_size += len(diff)
