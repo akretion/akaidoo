@@ -53,6 +53,21 @@ FRAMEWORK_ADDONS = (
 
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
 
+BINARY_EXTS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".pdf",
+    ".map",
+)
+
 
 def is_trivial_init_py(file_path: Path) -> bool:
     try:
@@ -430,14 +445,18 @@ def akaidoo_command_entrypoint(
             echo.debug(f"Resolved relative path to: {potential_path}")
 
         for item in potential_path.rglob("*"):
-            if item.is_file():
-                if (
-                    "__pycache__" in str(item)
-                    or str(item).replace(str(potential_path), "").startswith("/")
-                    or ".png" in str(item)
-                ):
-                    continue
-                found_files_list.append(item)
+            if not item.is_file():
+                continue
+
+            rel = item.relative_to(potential_path)
+            if (
+                "__pycache__" in rel.parts  # skip __pycache__ dirs
+                or rel.parts[0].startswith(".")  # skip hidden files/dirs
+                or item.suffix.lower() in BINARY_EXTS
+            ):
+                continue
+
+            found_files_list.append(item)
         echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
 
         process_and_output_files(
