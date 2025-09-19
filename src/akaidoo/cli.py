@@ -49,6 +49,8 @@ FRAMEWORK_ADDONS = (
     "auth_signup",
     "base_setup",
     "http_routing",
+    "utm",
+    "uom",
 )
 
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
