@@ -1,46 +1,79 @@
-import argparse
 import sys
 from pathlib import Path
+from typing import List, Optional, Set
 from tree_sitter import Language, Parser
 from tree_sitter_python import language as python_language
 
 # --- Parser Initialization ---
-# Initialize the parser with the Python language
 parser = Parser()
 parser.language = Language(python_language())
 
 
-def shrink_python_file(path: str, aggressive: bool = False) -> str:
+def get_odoo_model_name(body_node, code_bytes: bytes) -> Optional[str]:
     """
-    Shrinks Python code from a file to keep only class/function definitions
-    (with decorators), class attributes, and field assignments.
+    Scans a class body for an assignment to _name or _inherit and returns the string value.
     """
-    # The parser works on bytes. All slicing must be done on the
-    # byte array and then decoded. Using byte indices on the original string
-    # will fail if there are multi-byte UTF-8 characters in the file.
+    for child in body_node.children:
+        if child.type == "expression_statement":
+            assign = child.child(0)
+            if assign and assign.type == "assignment":
+                left = assign.child_by_field_name("left")
+                if (
+                    left
+                    and left.type == "identifier"
+                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+                    == "_name"
+                ):
+                    right = assign.child_by_field_name("right")
+                    if right and right.type == "string":
+                        # Extract and strip quotes
+                        val = code_bytes[right.start_byte : right.end_byte].decode(
+                            "utf-8"
+                        )
+                        return val.strip("'\"")
+                elif (
+                    left
+                    and left.type == "identifier"
+                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+                    == "_inherit"
+                ):
+                    right = assign.child_by_field_name("right")
+                    if right and right.type == "string":
+                        # Extract and strip quotes
+                        val = code_bytes[right.start_byte : right.end_byte].decode(
+                            "utf-8"
+                        )
+                        return val.strip("'\"")
+    return None
+
+
+def shrink_python_file(
+    path: str, aggressive: bool = False, expand_models: Optional[Set[str]] = None
+) -> str:
+    """
+    Shrinks Python code from a file. If a class matches a model name in 
+    expand_models, its full content is preserved.
+    """
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
     tree = parser.parse(code_bytes)
     root_node = tree.root_node
 
     shrunken_parts = []
+    expand_models = expand_models or set()
 
     def process_function(node, indent=""):
-        """
-        Correctly extracts the full header of a function (including decorators)
-        and replaces its body with 'pass'.
-        """
         func_def_node = node
         if node.type == "decorated_definition":
             definition = node.child_by_field_name("definition")
             if definition and definition.type == "function_definition":
                 func_def_node = definition
             else:
-                return  # This is a decorated class, not a function we should process.
+                return
 
         body_node = func_def_node.child_by_field_name("body")
         if not body_node:
-            return  # No body found, skip.
+            return
 
         start_byte = node.start_byte
         end_byte = body_node.start_byte
@@ -55,7 +88,6 @@ def shrink_python_file(path: str, aggressive: bool = False) -> str:
         if not aggressive:
             shrunken_parts.append(f"{indent}    pass  # shrunk")
 
-    # --- Main Processing Loop ---
     for node in root_node.children:
         if node.type in ("import_statement", "import_from_statement"):
             continue
@@ -65,25 +97,36 @@ def shrink_python_file(path: str, aggressive: bool = False) -> str:
             if not body_node:
                 continue
 
-            header_end = body_node.start_byte
-            class_header = (
-                code_bytes[node.start_byte : header_end].decode("utf8").strip()
-            )
-            shrunken_parts.append(class_header)
+            model_name = get_odoo_model_name(body_node, code_bytes)
+            should_expand = model_name in expand_models
 
-            for child in body_node.children:
-                if child.type == "expression_statement":
-                    expr = child.child(0)
-                    if expr and expr.type == "assignment":
-                        line_bytes = code_bytes[child.start_byte : child.end_byte]
-                        line_text = line_bytes.decode("utf8").strip()
-                        shrunken_parts.append(f"    {line_text}")
-                elif (
-                    child.type in ("function_definition", "decorated_definition")
-                    and not aggressive
-                ):
-                    shrunken_parts.append("")
-                    process_function(child, indent="    ")
+            if should_expand:
+                # Copy the whole class definition including header and body
+                class_full_text = code_bytes[node.start_byte : node.end_byte].decode(
+                    "utf-8"
+                )
+                shrunken_parts.append(class_full_text)
+            else:
+                # Standard shrinking logic
+                header_end = body_node.start_byte
+                class_header = (
+                    code_bytes[node.start_byte : header_end].decode("utf8").strip()
+                )
+                shrunken_parts.append(class_header)
+
+                for child in body_node.children:
+                    if child.type == "expression_statement":
+                        expr = child.child(0)
+                        if expr and expr.type == "assignment":
+                            line_bytes = code_bytes[child.start_byte : child.end_byte]
+                            line_text = line_bytes.decode("utf8").strip()
+                            shrunken_parts.append(f"    {line_text}")
+                    elif (
+                        child.type in ("function_definition", "decorated_definition")
+                        and not aggressive
+                    ):
+                        shrunken_parts.append("")
+                        process_function(child, indent="    ")
             shrunken_parts.append("")
 
         elif (
@@ -100,61 +143,35 @@ def shrink_python_file(path: str, aggressive: bool = False) -> str:
                 line_text = line_bytes.decode("utf8").strip()
                 shrunken_parts.append(line_text)
 
-    # Clean up any trailing newlines before joining
     while shrunken_parts and shrunken_parts[-1] == "":
         shrunken_parts.pop()
 
     return "\n".join(shrunken_parts) + "\n"
 
 
-# --- Command-Line Entry Point ---
 def main():
-    """
-    Main function to handle command-line arguments for the shrinker tool.
-    """
     cli_parser = argparse.ArgumentParser(
-        description="Shrink a Python file to its structural components (classes, methods, fields)."
+        description="Shrink a Python file to its structural components."
     )
-    cli_parser.add_argument(
-        "input_file", type=str, help="The path to the Python file you want to shrink."
-    )
-    cli_parser.add_argument(
-        "-S",
-        "--shrink-aggressive",
-        action="store_true",
-        help="Enable aggressive shrinking, removing method bodies entirely.",
-    )
-    cli_parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        help="Optional: The path to save the shrunken file. If not provided, prints to console.",
-    )
+    cli_parser.add_argument("input_file", type=str)
+    cli_parser.add_argument("-S", "--shrink-aggressive", action="store_true")
+    cli_parser.add_argument("-E", "--expand", type=str, help="Comma separated models to expand.")
+    cli_parser.add_argument("-o", "--output", type=str)
     args = cli_parser.parse_args()
+
+    expand_set = set(args.expand.split(",")) if args.expand else set()
 
     try:
         shrunken_content = shrink_python_file(
-            args.input_file, aggressive=args.shrink_aggressive
+            args.input_file, aggressive=args.shrink_aggressive, expand_models=expand_set
         )
-
         if args.output:
-            # Write to the specified output file
-            output_path = Path(args.output)
-            output_path.write_text(shrunken_content, encoding="utf-8")
-            print(
-                f"Successfully shrunk '{args.input_file}' and saved to '{args.output}'"
-            )
+            Path(args.output).write_text(shrunken_content, encoding="utf-8")
         else:
-            # Print directly to standard output (the console)
             sys.stdout.write(shrunken_content)
-
-    except FileNotFoundError:
-        print(f"Error: The file '{args.input_file}' was not found.", file=sys.stderr)
-        sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
