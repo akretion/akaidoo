@@ -400,6 +400,13 @@ def akaidoo_command_entrypoint(
         "-S",
         help="Enable aggressive shrinking, removing method bodies entirely.",
     ),
+    expand_models_str: Optional[str] = typer.Option(
+        None,
+        "--expand",
+        "-E",
+        help="Comma-separated list of Odoo models to fully expand even when shrinking.",
+        show_default=False,
+    ),
     output_file: Optional[Path] = typer.Option(
         #        Path("akaidoo.out"),
         None,
@@ -441,6 +448,9 @@ def akaidoo_command_entrypoint(
     found_files_list: List[Path] = []
     shrunken_files_content: Dict[Path, str] = {}
     diffs = []
+    expand_models_set = set()
+    if expand_models_str:
+        expand_models_set = {m.strip() for m in expand_models_str.split(",")}
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
@@ -797,6 +807,7 @@ def akaidoo_command_entrypoint(
                                         shrunken_content = shrink_python_file(
                                             str(found_file),
                                             aggressive=shrink_aggressive,
+                                            expand_models=expand_models_set,
                                         )
                                         shrunken_files_content[abs_file_path] = (
                                             shrunken_content
