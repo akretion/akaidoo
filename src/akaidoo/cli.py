@@ -117,6 +117,7 @@ def process_and_output_files(
     separator_char: str,
     shrunken_files_content: Dict[Path, str],
     diffs: List[str],
+    introduction: str,
 ):
     """Helper function to handle the output of found files."""
     if not files_to_process:
@@ -196,7 +197,7 @@ def process_and_output_files(
         for diff in diffs:
             all_content_for_clipboard.append(diff)
 
-        clipboard_text = "\n\n".join(all_content_for_clipboard)
+        clipboard_text = introduction + "\n\n".join(all_content_for_clipboard)
         try:
             pyperclip.copy(clipboard_text)
             print(
@@ -218,6 +219,7 @@ def process_and_output_files(
         total_size = 0
         try:
             with output_file_opt.open("w", encoding="utf-8") as f:
+                f.write(introduction + "\n\n")
                 for fp in sorted_file_paths:
                     try:
                         header = f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path
@@ -449,8 +451,28 @@ def akaidoo_command_entrypoint(
     shrunken_files_content: Dict[Path, str] = {}
     diffs = []
     expand_models_set = set()
+    if shrink or shrink_aggressive:
+        only_models = True
     if expand_models_str:
+        # If the user wants to expand specific models, they almost certainly
+        # want to shrink the rest to save tokens.
+        if not (shrink or shrink_aggressive):
+            echo.info(f"Option --expand provided: implying --shrink (-s).")
+            shrink = True
+
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
+
+    introduction = """Role: Senior Odoo Architect enforcing OCA standards.
+Context: The following is a codebase dump produced by the akaidoo CLI. 
+Conventions: 
+1. Files start with `# FILEPATH: [path]`.
+2. Some files were filtered out to save tokens; ask for them if you need."""
+    if shrink:
+        introduction += """
+3. `# shrunk` indicates code removed to save tokens; ask for full content if a specific logic flow is unclear."""
+    if shrink_aggressive:
+        introduction += """
+4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
@@ -487,6 +509,7 @@ def akaidoo_command_entrypoint(
             separator,
             shrunken_files_content,
             diffs,
+            "",
         )
         raise typer.Exit()
 
@@ -871,6 +894,7 @@ def akaidoo_command_entrypoint(
         separator,
         shrunken_files_content,
         diffs,
+        introduction,
     )
 
 
