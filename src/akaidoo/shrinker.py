@@ -1,6 +1,7 @@
 import sys
+import argparse
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Optional, Set
 from tree_sitter import Language, Parser
 from tree_sitter_python import language as python_language
 
@@ -51,7 +52,7 @@ def shrink_python_file(
     path: str, aggressive: bool = False, expand_models: Optional[Set[str]] = None
 ) -> str:
     """
-    Shrinks Python code from a file. If a class matches a model name in 
+    Shrinks Python code from a file. If a class matches a model name in
     expand_models, its full content is preserved.
     """
     code = Path(path).read_text(encoding="utf-8")
@@ -155,7 +156,9 @@ def main():
     )
     cli_parser.add_argument("input_file", type=str)
     cli_parser.add_argument("-S", "--shrink-aggressive", action="store_true")
-    cli_parser.add_argument("-E", "--expand", type=str, help="Comma separated models to expand.")
+    cli_parser.add_argument(
+        "-E", "--expand", type=str, help="Comma separated models to expand."
+    )
     cli_parser.add_argument("-o", "--output", type=str)
     args = cli_parser.parse_args()
 
@@ -172,6 +175,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
