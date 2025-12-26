@@ -1,6 +1,5 @@
 import ast
 import re
-import shlex
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -458,7 +457,7 @@ def akaidoo_command_entrypoint(
         # If the user wants to expand specific models, they almost certainly
         # want to shrink the rest to save tokens.
         if not (shrink or shrink_aggressive):
-            echo.info(f"Option --expand provided: implying --shrink (-s).")
+            echo.info("Option --expand provided: implying --shrink (-s).")
             shrink = True
 
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
@@ -467,7 +466,7 @@ def akaidoo_command_entrypoint(
     introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
 Context: The following is a codebase dump produced by the akaidoo CLI.
 Command: {cmd_call}
-Conventions: 
+Conventions:
 1. Files start with `# FILEPATH: [path]`.
 2. Some files were filtered out to save tokens; ask for them if you need."""
     if shrink:
