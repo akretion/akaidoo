@@ -478,7 +478,7 @@ Conventions:
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
-    if potential_path.is_dir() and not (potential_path / "__manifest__.py").is_file():
+    if potential_path.is_dir() and (addon_name.endswith("/") or not (potential_path / "__manifest__.py").is_file()):
         echo.info(
             f"Target '{addon_name}' is a directory. Listing all files recursively.",
             bold=True,
