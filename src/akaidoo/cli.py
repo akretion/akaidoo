@@ -52,6 +52,7 @@ FRAMEWORK_ADDONS = (
     "http_routing",
     "utm",
     "uom",
+    "product",
 )
 
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
