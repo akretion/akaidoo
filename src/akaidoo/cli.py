@@ -2,7 +2,7 @@ import ast
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import shlex
 import subprocess
 import os
@@ -22,6 +22,12 @@ from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list, comma_split
 
 from .shrinker import shrink_python_file
+from .scanner import (
+    BINARY_EXTS,
+    is_trivial_init_py,
+    scan_directory_files,
+    scan_addon_files,
+)
 
 try:
     from importlib import metadata
@@ -56,39 +62,6 @@ FRAMEWORK_ADDONS = (
 )
 
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
-
-BINARY_EXTS = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".ico",
-    ".svg",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".eot",
-    ".pdf",
-    ".map",
-)
-
-
-def is_trivial_init_py(file_path: Path) -> bool:
-    try:
-        with file_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                stripped_line = line.strip()
-                if (
-                    not stripped_line
-                    or stripped_line.startswith("#")
-                    or stripped_line.startswith("import ")
-                    or stripped_line.startswith("from ")
-                ):
-                    continue
-                return False
-        return True
-    except Exception:
-        return False
 
 
 def version_callback_for_run(value: bool):
@@ -247,6 +220,114 @@ def process_and_output_files(
             raise typer.Exit(1)
     else:  # Default: print paths
         print_list([str(p.resolve()) for p in sorted_file_paths], separator_char)
+
+
+def scan_extra_scripts(
+    addon_name: str,
+    openupgrade_path: Optional[Path],
+    module_diff_path: Optional[Path],
+) -> List[Path]:
+    extra_files = []
+    if openupgrade_path:
+        ou_scripts_base_path = openupgrade_path / "openupgrade_scripts" / "scripts"
+        addon_ou_script_path = ou_scripts_base_path / addon_name
+        if addon_ou_script_path.is_dir():
+            echo.debug(
+                f"Scanning OpenUpgrade scripts in {addon_ou_script_path} "
+                f"for {addon_name}..."
+            )
+            for ou_file in addon_ou_script_path.rglob("*"):
+                if ou_file.is_file():
+                    extra_files.append(ou_file.resolve())
+        else:
+            echo.debug(
+                f"No OpenUpgrade script directory found for {addon_name} "
+                f"at {addon_ou_script_path}"
+            )
+
+    if module_diff_path:
+        addon_diff_path = module_diff_path / addon_name
+        if addon_diff_path.is_dir():
+            echo.debug(
+                f"Scanning module diff scripts in {addon_diff_path} "
+                f"for {addon_name}..."
+            )
+            for diff_file in addon_diff_path.rglob("*"):
+                if diff_file.is_file():
+                    extra_files.append(diff_file.resolve())
+        else:
+            echo.debug(
+                f"No addon diff directory found for {addon_name} at {addon_diff_path}"
+            )
+    return extra_files
+
+
+def resolve_addons_selection(
+    selected_addon_names: Set[str],
+    addons_set: AddonsSet,
+    exclude_core: bool,
+    final_odoo_series: Optional[OdooSeries],
+) -> List[str]:
+    selection = AddonsSelection(selected_addon_names)
+    sorter = AddonSorterTopological()
+    try:
+        dependent_addons, missing = list_depends_command(
+            selection, addons_set, True, True, sorter
+        )
+    except CycleErrorExit:
+        raise typer.Exit(1)
+    if missing:
+        echo.warning(f"Missing dependencies: {', '.join(sorted(missing))}")
+
+    dependent_addons_list = list(dependent_addons)
+    echo.info(
+        f"{len(dependent_addons_list)} addons in dependency tree (incl. targets).",
+        bold=True,
+    )
+    if manifestoo_echo_module.verbosity >= 2:
+        print_list(dependent_addons_list, ", ", intro="Dependency list: ")
+
+    if exclude_core:
+        ensure_odoo_series(final_odoo_series)
+        core_addons_set = get_core_addons(final_odoo_series)
+        echo.info(
+            f"Excluding {len(core_addons_set)} core addons for {final_odoo_series}."
+        )
+        intermediate_target_addons = []
+        for dep_name in dependent_addons_list:
+            if dep_name not in core_addons_set:
+                intermediate_target_addons.append(dep_name)
+            elif manifestoo_echo_module.verbosity >= 1:
+                echo.info(f"Excluding core addon: {dep_name}")
+        return intermediate_target_addons
+
+    return dependent_addons_list
+
+
+def resolve_addons_path(
+    addons_path_str: Optional[str],
+    addons_path_from_import_odoo: bool,
+    addons_path_python: str,
+    odoo_cfg: Optional[Path],
+) -> ManifestooAddonsPath:
+    m_addons_path = ManifestooAddonsPath()
+    if addons_path_str:
+        m_addons_path.extend_from_addons_path(addons_path_str)
+    if addons_path_from_import_odoo:
+        m_addons_path.extend_from_import_odoo(addons_path_python)
+    if odoo_cfg:
+        m_addons_path.extend_from_odoo_cfg(odoo_cfg)
+    elif (
+        os.environ.get("VIRTUAL_ENV")
+        and os.environ["VIRTUAL_ENV"].endswith("odoo")
+        and Path(os.environ["VIRTUAL_ENV"] + ".cfg").is_file()
+    ):
+        echo.debug(f"reading addons_path from {os.environ['VIRTUAL_ENV']}.cfg")
+        m_addons_path.extend_from_odoo_cfg(os.environ["VIRTUAL_ENV"] + ".cfg")
+    elif Path("/etc/odoo.cfg").is_file():
+        echo.debug("reading addons_path from /etc/odoo.cfg")
+        m_addons_path.extend_from_odoo_cfg("/etc/odoo.cfg")
+    return m_addons_path
 
 
 def akaidoo_command_entrypoint(
@@ -492,19 +573,7 @@ Conventions:
             potential_path = potential_path.resolve()
             echo.debug(f"Resolved relative path to: {potential_path}")
 
-        for item in potential_path.rglob("*"):
-            if not item.is_file():
-                continue
-
-            rel = item.relative_to(potential_path)
-            if (
-                "__pycache__" in rel.parts  # skip __pycache__ dirs
-                or rel.parts[0].startswith(".")  # skip hidden files/dirs
-                or item.suffix.lower() in BINARY_EXTS
-            ):
-                continue
-
-            found_files_list.append(item)
+        found_files_list = scan_directory_files(potential_path)
         echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
 
         process_and_output_files(
@@ -527,23 +596,12 @@ Conventions:
         bold=True,
     )
 
-    m_addons_path = ManifestooAddonsPath()
-    if addons_path_str:
-        m_addons_path.extend_from_addons_path(addons_path_str)
-    if addons_path_from_import_odoo:
-        m_addons_path.extend_from_import_odoo(addons_path_python)
-    if odoo_cfg:
-        m_addons_path.extend_from_odoo_cfg(odoo_cfg)
-    elif (
-        os.environ.get("VIRTUAL_ENV")
-        and os.environ["VIRTUAL_ENV"].endswith("odoo")
-        and Path(os.environ["VIRTUAL_ENV"] + ".cfg").is_file()
-    ):
-        echo.debug(f"reading addons_path from {os.environ['VIRTUAL_ENV']}.cfg")
-        m_addons_path.extend_from_odoo_cfg(os.environ["VIRTUAL_ENV"] + ".cfg")
-    elif Path("/etc/odoo.cfg").is_file():
-        echo.debug("reading addons_path from /etc/odoo.cfg")
-        m_addons_path.extend_from_odoo_cfg("/etc/odoo.cfg")
+    m_addons_path = resolve_addons_path(
+        addons_path_str,
+        addons_path_from_import_odoo,
+        addons_path_python,
+        odoo_cfg,
+    )
 
     if not m_addons_path and not potential_path.is_dir():
         echo.error(
@@ -590,39 +648,9 @@ Conventions:
         )
         raise typer.Exit(1)
 
-    selection = AddonsSelection(selected_addon_names)
-    sorter = AddonSorterTopological()
-    try:
-        dependent_addons, missing = list_depends_command(
-            selection, addons_set, True, True, sorter
-        )
-    except CycleErrorExit:
-        raise typer.Exit(1)
-    if missing:
-        echo.warning(f"Missing dependencies: {', '.join(sorted(missing))}")
-
-    dependent_addons_list = list(dependent_addons)
-    echo.info(
-        f"{len(dependent_addons_list)} addons in dependency tree (incl. targets).",
-        bold=True,
+    intermediate_target_addons = resolve_addons_selection(
+        selected_addon_names, addons_set, exclude_core, final_odoo_series
     )
-    if manifestoo_echo_module.verbosity >= 2:
-        print_list(dependent_addons_list, ", ", intro="Dependency list: ")
-
-    intermediate_target_addons: List[str] = []
-    if exclude_core:
-        assert final_odoo_series is not None
-        core_addons_set = get_core_addons(final_odoo_series)
-        echo.info(
-            f"Excluding {len(core_addons_set)} core addons for {final_odoo_series}."
-        )
-        for dep_name in dependent_addons_list:
-            if dep_name not in core_addons_set:
-                intermediate_target_addons.append(dep_name)
-            elif manifestoo_echo_module.verbosity >= 1:
-                echo.info(f"Excluding core addon: {dep_name}")
-    else:
-        intermediate_target_addons = dependent_addons_list
 
     target_addon_names: List[str]
     if only_target_addon:
@@ -677,227 +705,39 @@ Conventions:
             processed_addons_count += 1
             echo.info(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
 
-            scan_roots: List[str] = []
-            if only_models:
-                scan_roots.append("models")
-                if include_data:
-                    scan_roots.append("data")
-            elif only_views:
-                scan_roots.append("views")
-            else:
-                if include_models:
-                    scan_roots.append("models")
-                if include_views:
-                    scan_roots.append("views")
-                if include_wizards:
-                    scan_roots.extend(["wizard", "wizards"])
-                if include_reports:
-                    scan_roots.extend(["report", "reports"])
-                if include_data:
-                    scan_roots.append("data")
-                if not scan_roots or include_models:
-                    scan_roots.append(".")
-
-            current_addon_extensions: List[str] = []
-            if include_models or only_models:
-                current_addon_extensions.append(".py")
-            if include_views or only_views or include_wizards or include_reports:
-                if ".xml" not in current_addon_extensions:
-                    current_addon_extensions.append(".xml")
-
-            if not current_addon_extensions:
-                echo.debug(
-                    f"No specific file types for regular files in {addon_to_scan_name}, "
-                    "skipping."
-                )
-            else:
-                for root_name in set(scan_roots):
-                    scan_path_dir = (
-                        addon_dir / root_name if root_name != "." else addon_dir
-                    )
-                    if not scan_path_dir.is_dir():
-                        continue
-
-                    for ext in current_addon_extensions:
-                        files_to_check_in_addon: List[Path] = []
-                        if root_name == ".":
-                            if ext == ".py":
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("*.py")
-                                )
-                        elif root_name == "models":
-                            if ext == ".py":
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.py")
-                                )
-                        elif root_name == "views":
-                            if ext == ".xml":
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.xml")
-                                )
-                        elif root_name in ("wizard", "wizards"):
-                            if ext == ".xml":
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.xml")
-                                )
-                        elif root_name in ("report", "reports"):
-                            if ext == ".xml":
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.xml")
-                                )
-                        elif root_name == "data":
-                            if ext in (".csv", ".xml"):
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.csv")
-                                )
-                                files_to_check_in_addon.extend(
-                                    scan_path_dir.glob("**/*.xml")
-                                )
-
-                        for found_file in files_to_check_in_addon:
-                            if not found_file.is_file():
-                                continue
-                            relative_path_parts = found_file.relative_to(
-                                addon_dir
-                            ).parts
-                            is_framework_file = any(
-                                f"/addons/{name}/" in str(found_file.resolve())
-                                for name in FRAMEWORK_ADDONS
-                            )
-                            is_model_file = (
-                                "models" in relative_path_parts and ext == ".py"
-                            )
-                            is_view_file = (
-                                "views" in relative_path_parts and ext == ".xml"
-                            )
-                            is_wizard_file = (
-                                "wizard" in relative_path_parts
-                                or "wizards" in relative_path_parts
-                            ) and ext == ".xml"
-                            is_report_file = (
-                                "report" in relative_path_parts
-                                or "reports" in relative_path_parts
-                            ) and ext == ".xml"
-                            is_data_file = ("data" in relative_path_parts) and ext in (
-                                ".csv",
-                                ".xml",
-                            )
-                            is_root_py_file = (
-                                len(relative_path_parts) == 1
-                                and relative_path_parts[0].endswith(".py")
-                                and root_name == "."
-                            )
-                            if only_models and not (is_model_file or is_data_file):
-                                continue
-                            if only_views and not is_view_file:
-                                continue
-                            if is_framework_file and exclude_framework:
-                                if manifestoo_echo_module.verbosity >= 1:
-                                    echo.info(f"Excluding framework file: {found_file}")
-                                continue
-                            if not (only_models or only_views):
-                                file_type_matches_include = False
-                                if include_models and (
-                                    is_model_file or is_root_py_file
-                                ):
-                                    file_type_matches_include = True
-                                if include_views and is_view_file:
-                                    file_type_matches_include = True
-                                if include_wizards and is_wizard_file:
-                                    file_type_matches_include = True
-                                if include_reports and is_report_file:
-                                    file_type_matches_include = True
-                                if include_data and is_data_file:
-                                    file_type_matches_include = True
-                                if (
-                                    root_name == "."
-                                    and not is_root_py_file
-                                    and not (
-                                        is_model_file
-                                        or is_view_file
-                                        or is_wizard_file
-                                        or is_report_file
-                                    )
-                                ):
-                                    if not file_type_matches_include:
-                                        continue
-                                elif not file_type_matches_include:
-                                    continue
-                            if (
-                                found_file.name == "__init__.py"
-                                and (is_model_file or is_root_py_file)
-                                and is_trivial_init_py(found_file)
-                            ):
-                                echo.debug(
-                                    f"  Skipping trivial __init__.py: {found_file}"
-                                )
-                                continue
-                            abs_file_path = found_file.resolve()
-                            if abs_file_path not in found_files_list:
-                                if (
-                                    shrink
-                                    or shrink_aggressive
-                                    and found_file.suffix == ".py"
-                                ):
-                                    if (
-                                        shrink_aggressive
-                                        or addon_to_scan_name not in selected_addon_names
-                                    ):
-                                        shrunken_content = shrink_python_file(
-                                            str(found_file),
-                                            aggressive=shrink_aggressive,
-                                            expand_models=expand_models_set,
-                                        )
-                                        shrunken_files_content[abs_file_path] = (
-                                            shrunken_content
-                                        )
-                                found_files_list.append(abs_file_path)
+            addon_files = scan_addon_files(
+                addon_dir=addon_dir,
+                addon_name=addon_to_scan_name,
+                target_addon_names=selected_addon_names,
+                include_models=include_models,
+                include_views=include_views,
+                include_wizards=include_wizards,
+                include_reports=include_reports,
+                include_data=include_data,
+                only_models=only_models,
+                only_views=only_views,
+                exclude_framework=exclude_framework,
+                framework_addons=FRAMEWORK_ADDONS,
+                shrink=shrink,
+                shrink_aggressive=shrink_aggressive,
+                expand_models_set=expand_models_set,
+                shrunken_files_content=shrunken_files_content,
+            )
+            for f in addon_files:
+                if f not in found_files_list:
+                    found_files_list.append(f)
         else:
             echo.warning(
                 f"Odoo Addon '{addon_to_scan_name}' metadata not found, "
                 "skipping its Odoo file scan."
             )
 
-        if openupgrade_path:
-            ou_scripts_base_path = openupgrade_path / "openupgrade_scripts" / "scripts"
-            addon_ou_script_path = ou_scripts_base_path / addon_to_scan_name
-            if addon_ou_script_path.is_dir():
-                echo.debug(
-                    f"Scanning OpenUpgrade scripts in {addon_ou_script_path} "
-                    f"for {addon_to_scan_name}..."
-                )
-                for ou_file in addon_ou_script_path.rglob("*"):
-                    if ou_file.is_file():
-                        abs_ou_file_path = ou_file.resolve()
-                        if abs_ou_file_path not in found_files_list:
-                            found_files_list.append(abs_ou_file_path)
-                            echo.debug(
-                                f"  Added OpenUpgrade script: {abs_ou_file_path}"
-                            )
-            else:
-                echo.debug(
-                    f"No OpenUpgrade script directory found for {addon_to_scan_name} "
-                    f"at {addon_ou_script_path}"
-                )
-
-        if module_diff_path:
-            addon_diff_path = module_diff_path / addon_to_scan_name
-            if module_diff_path.is_dir():
-                echo.debug(
-                    f"Scanning OpenUpgrade scripts in {addon_diff_path} "
-                    f"for {addon_to_scan_name}..."
-                )
-                for diff_file in addon_diff_path.rglob("*"):
-                    if diff_file.is_file():
-                        abs_diff_file_path = diff_file.resolve()
-                        if abs_diff_file_path not in found_files_list:
-                            found_files_list.append(abs_diff_file_path)
-                            echo.debug(f"  Added pseudo diff: {abs_diff_file_path}")
-            else:
-                echo.debug(
-                    f"No addon diff directory found for {addon_to_scan_name} "
-                    f"at {addon_ou_script_path}"
-                )
+        extra_scripts = scan_extra_scripts(
+            addon_to_scan_name, openupgrade_path, module_diff_path
+        )
+        for f in extra_scripts:
+            if f not in found_files_list:
+                found_files_list.append(f)
 
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
 
