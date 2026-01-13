@@ -149,7 +149,7 @@ def scan_addon_files(
                     for name in framework_addons
                 )
                 if is_framework_file and exclude_framework:
-                    if manifestoo_echo_module.verbosity >= 1:
+                    if manifestoo_echo_module.verbosity >= 3:
                         echo.info(f"Excluding framework file: {found_file}")
                     continue
 
