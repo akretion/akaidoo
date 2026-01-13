@@ -284,9 +284,7 @@ def test_list_files_basic_addons_path(dummy_addons_env):
 
     expected_present_basenames = {
         "a_model.py",
-        "a_view.xml",
         "b_model.py",
-        "b_wizard.xml",
         "base_model.py",
         f"{dummy_addons_env['framework_addon_name']}_model.py",
         "__init__.py",
@@ -375,6 +373,7 @@ def test_list_files_no_wizards(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
+        "--include-views",
         "--no-include-wizards",
         "--separator",
         ",",
@@ -406,7 +405,6 @@ def test_list_files_only_target_addon(dummy_addons_env):
     expected_addon_a_files = {
         "__init__.py",
         "a_model.py",
-        "a_view.xml",
         "__manifest__.py",
     }
     assert output_files.issuperset(expected_addon_a_files)
@@ -834,3 +832,181 @@ def test_project_mode_mixed(project_structure):
     result = _run_cli(args)
     assert "a1.py" in result.stdout
     assert "a2.py" in result.stdout
+
+
+@pytest.fixture(scope="module")
+def auto_expand_env(tmp_path_factory):
+    base_path = tmp_path_factory.mktemp("auto_expand_env")
+    addons_path = base_path / "addons"
+    addons_path.mkdir()
+
+    base_addon_path = addons_path / "base"
+    base_addon_path.mkdir()
+    (base_addon_path / "__init__.py").touch()
+    (base_addon_path / "__manifest__.py").write_text(
+        "{'name': 'Base', 'version': '16.0.1.0.0', 'depends': [], 'installable': True}"
+    )
+    (base_addon_path / "models").mkdir()
+    (base_addon_path / "models" / "__init__.py").write_text("")
+    
+    base_models_path = base_addon_path / "models"
+    
+    base_model_content = """from odoo import models, fields
+
+class BaseModel(models.Model):
+    _name = 'base.model'
+    _description = 'Base Model'
+    
+    name = fields.Char(string='Name')
+    code = fields.Char(string='Code')
+    active = fields.Boolean(string='Active', default=True)
+    
+    def action_activate(self):
+        self.active = True
+    
+    def action_deactivate(self):
+        self.active = False
+"""
+    (base_models_path / "base_model.py").write_text(base_model_content)
+
+    target_addon_path = addons_path / "target_addon"
+    target_addon_path.mkdir()
+    (target_addon_path / "__init__.py").touch()
+    (target_addon_path / "__manifest__.py").write_text(
+        "{'name': 'Target Addon', 'version': '16.0.1.0.0', 'depends': ['base'], 'installable': True}"
+    )
+    (target_addon_path / "models").mkdir()
+    (target_addon_path / "models" / "__init__.py").write_text("")
+    
+    target_models_path = target_addon_path / "models"
+    
+    high_score_model_content = """from odoo import models, fields, api
+
+class HighScoreModel(models.Model):
+    _inherit = 'base.model'
+    _description = 'High Score Model - should be auto expanded'
+    
+    custom_field1 = fields.Char(string='Custom Field 1')
+    custom_field2 = fields.Char(string='Custom Field 2')
+    custom_field3 = fields.Char(string='Custom Field 3')
+    custom_field4 = fields.Char(string='Custom Field 4')
+    custom_field5 = fields.Char(string='Custom Field 5')
+    custom_field6 = fields.Char(string='Custom Field 6')
+    
+    @api.model
+    def custom_method_one(self):
+        return True
+    
+    @api.model
+    def custom_method_two(self):
+        return True
+    
+    @api.model
+    def custom_method_three(self):
+        return True
+"""
+    (target_models_path / "high_score_model.py").write_text(high_score_model_content)
+    
+    low_score_model_content = """from odoo import models, fields
+
+class LowScoreModel(models.Model):
+    _inherit = 'base.model'
+    _description = 'Low Score Model - should NOT be auto expanded'
+    
+    minor_field = fields.Char(string='Minor Field')
+"""
+    (target_models_path / "low_score_model.py").write_text(low_score_model_content)
+
+    odoo_conf_path = base_path / "dummy_odoo.conf"
+    odoo_conf_path.write_text(f"[options]\naddons_path = {str(addons_path)}\n")
+
+    return {
+        "addons_path": addons_path,
+        "odoo_conf": odoo_conf_path,
+        "target_addon_path": target_addon_path,
+        "base_addon_path": base_addon_path,
+    }
+
+
+def test_auto_expand_high_score_model(auto_expand_env):
+    args = [
+        "target_addon",
+        "-c", str(auto_expand_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series", "16.0",
+        "--auto-expand",
+        "--shrink",
+        "--no-exclude-framework",
+        "-o", "/tmp/test_auto_expand.txt",
+    ]
+    result = _run_cli(args)
+    assert result.exit_code == 0
+    import os
+    os.remove("/tmp/test_auto_expand.txt")
+
+
+def test_auto_expand_implies_shrink(auto_expand_env):
+    args = [
+        "target_addon",
+        "-c", str(auto_expand_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series", "16.0",
+        "--auto-expand",
+        "--no-exclude-framework",
+        "-o", "/tmp/test_auto_expand2.txt",
+    ]
+    result = _run_cli(args)
+    assert result.exit_code == 0
+    import os
+    os.remove("/tmp/test_auto_expand2.txt")
+
+
+def test_auto_expand_with_explicit_expand(auto_expand_env):
+    args = [
+        "target_addon",
+        "-c", str(auto_expand_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series", "16.0",
+        "--auto-expand",
+        "--expand", "base.model",
+        "--no-exclude-framework",
+        "-o", "/tmp/test_auto_expand3.txt",
+    ]
+    result = _run_cli(args)
+    assert result.exit_code == 0
+    import os
+    os.remove("/tmp/test_auto_expand3.txt")
+
+
+def test_auto_expand_low_score_not_expanded(auto_expand_env):
+    low_score_addon_path = auto_expand_env["addons_path"] / "low_score_addon"
+    low_score_addon_path.mkdir()
+    (low_score_addon_path / "__init__.py").touch()
+    (low_score_addon_path / "__manifest__.py").write_text(
+        "{'name': 'Low Score Addon', 'version': '16.0.1.0.0', 'depends': ['base'], 'installable': True}"
+    )
+    (low_score_addon_path / "models").mkdir()
+    (low_score_addon_path / "models" / "__init__.py").write_text("")
+    
+    low_model_content = """from odoo import models, fields
+
+class VeryLowScoreModel(models.Model):
+    _inherit = 'base.model'
+    
+    tiny_field = fields.Char()
+"""
+    (low_score_addon_path / "models" / "low.py").write_text(low_model_content)
+    
+    args = [
+        "low_score_addon",
+        "-c", str(auto_expand_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series", "16.0",
+        "--auto-expand",
+        "--no-exclude-framework",
+        "-o", "/tmp/test_auto_expand4.txt",
+    ]
+    result = _run_cli(args)
+    assert result.exit_code == 0
+    import os
+    os.remove("/tmp/test_auto_expand4.txt")
