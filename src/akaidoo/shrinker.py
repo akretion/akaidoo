@@ -4,48 +4,7 @@ from pathlib import Path
 from typing import Optional, Set
 from tree_sitter import Language, Parser
 from tree_sitter_python import language as python_language
-
-# --- Parser Initialization ---
-parser = Parser()
-parser.language = Language(python_language())
-
-
-def get_odoo_model_name(body_node, code_bytes: bytes) -> Optional[str]:
-    """
-    Scans a class body for an assignment to _name or _inherit and returns the string value.
-    """
-    for child in body_node.children:
-        if child.type == "expression_statement":
-            assign = child.child(0)
-            if assign and assign.type == "assignment":
-                left = assign.child_by_field_name("left")
-                if (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_name"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        # Extract and strip quotes
-                        val = code_bytes[right.start_byte : right.end_byte].decode(
-                            "utf-8"
-                        )
-                        return val.strip("'\"")
-                elif (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_inherit"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        # Extract and strip quotes
-                        val = code_bytes[right.start_byte : right.end_byte].decode(
-                            "utf-8"
-                        )
-                        return val.strip("'\"")
-    return None
+from .utils import _get_odoo_model_name_from_body, parser
 
 
 def shrink_python_file(
@@ -98,7 +57,7 @@ def shrink_python_file(
             if not body_node:
                 continue
 
-            model_name = get_odoo_model_name(body_node, code_bytes)
+            model_name = _get_odoo_model_name_from_body(body_node, code_bytes)
             should_expand = model_name in expand_models
 
             if should_expand:

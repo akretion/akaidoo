@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Set, Iterable
 from pathlib import Path
 import typer
+import os
 from manifestoo_core.addon import Addon
 from manifestoo_core.core_addons import (
     is_core_addon,
@@ -8,9 +9,17 @@ from manifestoo_core.core_addons import (
     is_core_ee_addon,
 )
 from manifestoo_core.odoo_series import OdooEdition, OdooSeries
-from manifestoo import echo
+from .utils import get_file_odoo_models
 
 NodeKey = str
+
+def format_size(size_bytes: int) -> str:
+    """Formats file size in human readable string."""
+    for unit in ['B', 'KB', 'MB']:
+        if size_bytes < 1024:
+            return f"{size_bytes}{unit}"
+        size_bytes //= 1024
+    return f"{size_bytes}GB"
 
 class AkaidooNode:
     def __init__(self, addon_name: str, addon: Optional[Addon], files: List[Path]):
@@ -32,38 +41,32 @@ class AkaidooNode:
             TEE = "├── "
             LAST = "└── "
             
-            # Print Addon Node
+            # 1. Module Header
             prefix = "".join(indent)
-            typer.echo(f"{prefix}{node.addon_name}", nl=False)
+            typer.echo(f"{prefix}Module: {node.addon_name}", nl=False)
             
             if node.addon_name in seen:
                 typer.secho(" ⬆", dim=True)
                 return
             
             seen.add(node.addon_name)
+            typer.echo("")
             
-            # Show path or version info
+            # 2. Path Header
             if node.addon:
-                path_info = f" [{node.addon.path.resolve()}]"
-                typer.secho(path_info, dim=True)
+                typer.echo(f"{prefix}Path: {node.addon.path.resolve()}")
             else:
-                typer.secho(f" ({node.sversion(odoo_series)})", dim=True)
+                typer.secho(f"{prefix}Status: ({node.sversion(odoo_series)})", dim=True)
 
-            # Prepare for children/files
-            # We want to list files first, then children
-            
+            # Preparations
             has_files = len(node.files) > 0
             has_children = len(node.children) > 0 and not (fold_core_addons and is_core_addon(node.addon_name, odoo_series))
             
             # Calculate indent for contents
-            if not indent:
-                new_indent_base = []
-            else:
-                # If we are the last child, our children are indented with SPACE
-                # Otherwise with BRANCH
-                new_indent_base = indent[:-1] + [(SPACE if is_last else BRANCH)]
-
-            # Print Files
+            # We use the same indent level as the "Module:" line for its internal tree
+            # But children modules will be nested deeper.
+            
+            # 3. Print Files belonging to this module
             if has_files:
                 file_pointers = [TEE] * (len(node.files) - 1)
                 if has_children:
@@ -77,14 +80,30 @@ class AkaidooNode:
                         rel_path = f.relative_to(addon_path) if addon_path else f
                     except ValueError:
                         rel_path = f
-                    typer.echo(f"{''.join(new_indent_base)}{pointer}{rel_path}")
+                    
+                    size_str = ""
+                    try:
+                        size = f.stat().st_size
+                        size_str = f" ({format_size(size)})"
+                    except Exception:
+                        pass
+                    
+                    model_hint = ""
+                    if f.suffix == ".py":
+                        models = get_file_odoo_models(f)
+                        if models:
+                            model_hint = f" [Models: {', '.join(sorted(models))}]"
+                    
+                    typer.echo(f"{prefix}{pointer}{rel_path}{size_str}{model_hint}")
 
-            # Print Children
+            # 4. Print Children (Dependencies)
             if has_children:
+                # Add a blank line before dependencies for clarity
+                typer.echo("")
                 sorted_children = sorted(node.children, key=lambda n: n.addon_name)
                 child_pointers = [TEE] * (len(sorted_children) - 1) + [LAST]
                 for pointer, child in zip(child_pointers, sorted_children):
-                    _print(new_indent_base + [pointer], child, pointer == LAST)
+                    _print(indent + [pointer], child, pointer == LAST)
 
         _print([], self, True)
 
