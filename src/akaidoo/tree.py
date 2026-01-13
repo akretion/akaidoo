@@ -35,50 +35,47 @@ class AkaidooNode:
     def print_tree(self, odoo_series: OdooSeries, fold_core_addons: bool) -> None:
         seen: Set[str] = set()
 
-        def _print(indent: List[str], node: AkaidooNode, is_last: bool = False) -> None:
-            SPACE = "    "
-            BRANCH = "│   "
-            TEE = "├── "
-            LAST = "└── "
+        def _print(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
+            # Choose marker for this module node
+            if is_root:
+                marker = ""
+            else:
+                marker = "└── " if is_last else "├── "
             
             # 1. Module Header
-            prefix = "".join(indent)
-            typer.echo(f"{prefix}Module: {node.addon_name}", nl=False)
+            typer.echo(f"{indent}{marker}Module: {node.addon_name}", nl=False)
             
             if node.addon_name in seen:
                 typer.secho(" ⬆", dim=True)
                 return
-            
             seen.add(node.addon_name)
             typer.echo("")
             
+            # Determine indentation for contents and children of this module
+            if is_root:
+                content_indent = ""
+            else:
+                content_indent = indent + ("    " if is_last else "│   ")
+            
             # 2. Path Header
             if node.addon:
-                typer.echo(f"{prefix}Path: {node.addon.path.resolve()}")
+                typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
             else:
-                typer.secho(f"{prefix}Status: ({node.sversion(odoo_series)})", dim=True)
+                typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
-            # Preparations
             has_files = len(node.files) > 0
             has_children = len(node.children) > 0 and not (fold_core_addons and is_core_addon(node.addon_name, odoo_series))
             
-            # Calculate indent for contents
-            # We use the same indent level as the "Module:" line for its internal tree
-            # But children modules will be nested deeper.
-            
-            # 3. Print Files belonging to this module
+            # 3. Print Files
             if has_files:
-                file_pointers = [TEE] * (len(node.files) - 1)
-                if has_children:
-                    file_pointers.append(TEE)
-                else:
-                    file_pointers.append(LAST)
-                
-                addon_path = node.addon.path.resolve() if node.addon else None
-                for pointer, f in zip(file_pointers, node.files):
+                for i, f in enumerate(node.files):
+                    # Check if this file is the absolute last item in this branch (module files + module children)
+                    is_last_file = (i == len(node.files) - 1) and not has_children
+                    file_marker = "└── " if is_last_file else "├── "
+                    
                     try:
-                        rel_path = f.relative_to(addon_path) if addon_path else f
-                    except ValueError:
+                        rel_path = f.relative_to(node.addon.path.resolve()) if node.addon else f
+                    except Exception:
                         rel_path = f
                     
                     size_str = ""
@@ -94,18 +91,20 @@ class AkaidooNode:
                         if models:
                             model_hint = f" [Models: {', '.join(sorted(models))}]"
                     
-                    typer.echo(f"{prefix}{pointer}{rel_path}{size_str}{model_hint}")
+                    typer.echo(f"{content_indent}{file_marker}{rel_path}{size_str}{model_hint}")
 
             # 4. Print Children (Dependencies)
             if has_children:
-                # Add a blank line before dependencies for clarity
-                typer.echo("")
+                # Add a vertical connector if there were files before
+                if has_files:
+                    typer.echo(f"{content_indent}│")
+                
                 sorted_children = sorted(node.children, key=lambda n: n.addon_name)
-                child_pointers = [TEE] * (len(sorted_children) - 1) + [LAST]
-                for pointer, child in zip(child_pointers, sorted_children):
-                    _print(indent + [pointer], child, pointer == LAST)
+                for i, child in enumerate(sorted_children):
+                    is_last_child = (i == len(sorted_children) - 1)
+                    _print(content_indent, child, is_last_child, False)
 
-        _print([], self, True)
+        _print("", self, True, True)
 
     def sversion(self, odoo_series: OdooSeries) -> str:
         if not self.addon:
