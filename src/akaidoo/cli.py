@@ -510,10 +510,10 @@ def akaidoo_command_entrypoint(
         True, "--include-models/--no-include-models", help="Include Python model files."
     ),
     include_views: bool = typer.Option(
-        True, "--include-views/--no-include-views", help="Include XML view files."
+        False, "--include-views/--no-include-views", help="Include XML view files."
     ),
     include_wizards: bool = typer.Option(
-        True, "--include-wizards/--no-include-wizards", help="Include XML wizard files."
+        False, "--include-wizards/--no-include-wizards", "-w", help="Include XML wizard files."
     ),
     include_reports: bool = typer.Option(
         False,
@@ -574,10 +574,22 @@ def akaidoo_command_entrypoint(
         show_default=False,
     ),
     auto_expand: bool = typer.Option(
-        False,
-        "--auto-expand",
-        "-a",
+        True,
+        "--auto-expand/--no-auto-expand",
         help="Automatically expand models significantly extended in target addons (score >= 7). Score: field=1, method=3, 10 lines=2.",
+    ),
+    focus_models_str: Optional[str] = typer.Option(
+        None,
+        "--focus-models",
+        "-F",
+        help="Only expand specific models (overrides auto-expand). Comma-separated list.",
+        show_default=False,
+    ),
+    add_expand_str: Optional[str] = typer.Option(
+        None,
+        "--add-expand",
+        help="Add models to auto-expand set. Comma-separated list.",
+        show_default=False,
     ),
     output_file: Optional[Path] = typer.Option(
         #        Path("akaidoo.out"),
@@ -633,9 +645,45 @@ def akaidoo_command_entrypoint(
 
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
 
-    if auto_expand:
+    focus_models_set: set[str] = set()
+    add_expand_set: set[str] = set()
+
+    focus_modes_count = sum([
+        bool(focus_models_str),
+        bool(add_expand_str),
+        auto_expand,
+    ])
+    if focus_modes_count > 1:
+        focus_flags = [
+            name
+            for flag, name in [
+                (focus_models_str, "--focus-models"),
+                (add_expand_str, "--add-expand"),
+                (auto_expand, "--auto-expand"),
+            ]
+            if flag
+        ]
+        echo.error(
+            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
+            "Use either --focus-models, --add-expand, or --auto-expand."
+        )
+        raise typer.Exit(1)
+
+    if focus_models_str:
+        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
+        auto_expand = False
+        expand_models_set = focus_models_set.copy()
         if not (shrink or shrink_aggressive):
-            echo.info("Option --auto-expand provided: implying --shrink (-s).")
+            echo.info("Option --focus-models provided: implying --shrink (-s).")
+            shrink = True
+    elif add_expand_str:
+        add_expand_set = {m.strip() for m in add_expand_str.split(",")}
+        if auto_expand and not (shrink or shrink_aggressive):
+            echo.info("Option --add-expand provided with --auto-expand: implying --shrink (-s).")
+            shrink = True
+    elif auto_expand:
+        if not (shrink or shrink_aggressive):
+            echo.info("Option --auto-expand enabled by default: implying --shrink (-s).")
             shrink = True
 
     cmd_call = shlex.join(sys.argv)
@@ -822,6 +870,14 @@ Conventions:
                 echo.info(f"Auto-expanded {len(expand_models_set)} models: {', '.join(sorted(expand_models_set))}")
             else:
                 echo.info("Auto-expand: No models met the threshold criteria.")
+    elif focus_models_set:
+        if manifestoo_echo_module.verbosity >= 1:
+            echo.info(f"Focus mode: Expanding {len(focus_models_set)} specified models: {', '.join(sorted(focus_models_set))}")
+    
+    if add_expand_set:
+        expand_models_set.update(add_expand_set)
+        if manifestoo_echo_module.verbosity >= 1:
+            echo.info(f"Added {len(add_expand_set)} models to expand set: {', '.join(sorted(add_expand_set))}")
 
     processed_addons_count = 0
     for addon_to_scan_name in target_addon_names:
