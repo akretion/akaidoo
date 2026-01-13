@@ -28,6 +28,7 @@ from .scanner import (
     scan_directory_files,
     scan_addon_files,
 )
+from .tree import print_akaidoo_tree
 
 try:
     from importlib import metadata
@@ -603,6 +604,13 @@ def akaidoo_command_entrypoint(
         help="Only list files from the target addon.",
         show_default=False,
     ),
+    tree: bool = typer.Option(
+        False,
+        "--tree",
+        "-T",
+        help="Show files in a dependency tree structure.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
@@ -610,6 +618,7 @@ def akaidoo_command_entrypoint(
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
 
     found_files_list: List[Path] = []
+    addon_files_map: Dict[str, List[Path]] = {}
     shrunken_files_content: Dict[Path, str] = {}
     diffs = []
     expand_models_set = set()
@@ -814,6 +823,7 @@ Conventions:
                 expand_models_set=expand_models_set,
                 shrunken_files_content=shrunken_files_content,
             )
+            addon_files_map[addon_to_scan_name] = addon_files
             for f in addon_files:
                 if f not in found_files_list:
                     found_files_list.append(f)
@@ -832,17 +842,30 @@ Conventions:
 
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
 
-    process_and_output_files(
-        found_files_list,
-        output_file,
-        clipboard,
-        edit_in_editor,
-        editor_command_str,
-        separator,
-        shrunken_files_content,
-        diffs,
-        introduction,
-    )
+    if (
+        tree
+        and not any([clipboard, output_file, edit_in_editor])
+        and selected_addon_names
+    ):
+        print_akaidoo_tree(
+            selected_addon_names,
+            addons_set,
+            addon_files_map,
+            final_odoo_series,
+            exclude_core,
+        )
+    else:
+        process_and_output_files(
+            found_files_list,
+            output_file,
+            clipboard,
+            edit_in_editor,
+            editor_command_str,
+            separator,
+            shrunken_files_content,
+            diffs,
+            introduction,
+        )
 
 
 def find_pr_commits_after_target(
