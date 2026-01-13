@@ -32,7 +32,13 @@ class AkaidooNode:
     def key(addon_name: str) -> NodeKey:
         return addon_name
 
-    def print_tree(self, odoo_series: OdooSeries, fold_core_addons: bool) -> None:
+    def print_tree(
+        self,
+        odoo_series: OdooSeries,
+        fold_core_addons: bool,
+        fold_framework_addons: bool = False,
+        framework_addons: Iterable[str] = (),
+    ) -> None:
         seen: Set[str] = set()
 
         def _print(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
@@ -68,7 +74,14 @@ class AkaidooNode:
                 typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
             has_files = len(node.files) > 0
-            has_children = len(node.children) > 0 and not (fold_core_addons and is_core_addon(node.addon_name, odoo_series))
+            
+            # Check for folding
+            is_core = is_core_addon(node.addon_name, odoo_series)
+            is_framework = node.addon_name in framework_addons
+            
+            should_fold = (fold_core_addons and is_core) or (fold_framework_addons and is_framework)
+            
+            has_children = len(node.children) > 0 and not should_fold
             
             # 3. Print Files
             if has_files:
@@ -126,6 +139,8 @@ def print_akaidoo_tree(
     addon_files_map: Dict[str, List[Path]],
     odoo_series: OdooSeries,
     fold_core_addons: bool,
+    fold_framework_addons: bool = False,
+    framework_addons: Iterable[str] = (),
 ):
     nodes: Dict[NodeKey, AkaidooNode] = {}
 
@@ -149,4 +164,9 @@ def print_akaidoo_tree(
         if name == "base":
             continue
         root_node = get_node(name)
-        root_node.print_tree(odoo_series, fold_core_addons)
+        root_node.print_tree(
+            odoo_series,
+            fold_core_addons,
+            fold_framework_addons=fold_framework_addons,
+            framework_addons=framework_addons,
+        )

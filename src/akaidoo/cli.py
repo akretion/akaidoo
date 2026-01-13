@@ -604,13 +604,6 @@ def akaidoo_command_entrypoint(
         help="Only list files from the target addon.",
         show_default=False,
     ),
-    tree: bool = typer.Option(
-        False,
-        "--tree",
-        "-T",
-        help="Show files in a dependency tree structure.",
-        show_default=False,
-    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
@@ -843,8 +836,7 @@ Conventions:
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
 
     if (
-        tree
-        and not any([clipboard, output_file, edit_in_editor])
+        not any([clipboard, output_file, edit_in_editor])
         and selected_addon_names
     ):
         print_akaidoo_tree(
@@ -853,6 +845,8 @@ Conventions:
             addon_files_map,
             final_odoo_series,
             exclude_core,
+            fold_framework_addons=exclude_framework,
+            framework_addons=FRAMEWORK_ADDONS,
         )
     else:
         process_and_output_files(
