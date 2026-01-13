@@ -22,6 +22,7 @@ from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list, comma_split
 
 from .shrinker import shrink_python_file
+from .utils import get_file_odoo_models, get_odoo_model_stats, AUTO_EXPAND_THRESHOLD
 from .scanner import (
     BINARY_EXTS,
     is_trivial_init_py,
@@ -572,6 +573,12 @@ def akaidoo_command_entrypoint(
         help="Comma-separated list of Odoo models to fully expand even when shrinking.",
         show_default=False,
     ),
+    auto_expand: bool = typer.Option(
+        False,
+        "--auto-expand",
+        "-a",
+        help="Automatically expand models significantly extended in target addons (score >= 7). Score: field=1, method=3, 10 lines=2.",
+    ),
     output_file: Optional[Path] = typer.Option(
         #        Path("akaidoo.out"),
         None,
@@ -625,6 +632,11 @@ def akaidoo_command_entrypoint(
             shrink = True
 
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
+
+    if auto_expand:
+        if not (shrink or shrink_aggressive):
+            echo.info("Option --auto-expand provided: implying --shrink (-s).")
+            shrink = True
 
     cmd_call = shlex.join(sys.argv)
     introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
@@ -767,6 +779,50 @@ Conventions:
         bold=True,
     )
 
+    # Auto-expand harvesting
+    if auto_expand:
+        # We need to scan the TARGET addons to find which models are significantly extended
+        # We use a set of names we explicitly selected OR detected as targets
+        harvest_targets = selected_addon_names
+        echo.debug(f"Auto-expand: Scanning {len(harvest_targets)} target addon(s) for models with score >= {AUTO_EXPAND_THRESHOLD}")
+        for addon_name_to_harvest in harvest_targets:
+            addon_meta = addons_set.get(addon_name_to_harvest)
+            if not addon_meta:
+                continue
+            
+            addon_dir = addon_meta.path.resolve()
+            models_dir = addon_dir / "models"
+            if not models_dir.exists() or not models_dir.is_dir():
+                echo.debug(f"Auto-expand: No models directory in addon '{addon_name_to_harvest}'")
+                continue
+            
+            echo.debug(f"Auto-expand: Harvesting from addon '{addon_name_to_harvest}' models at {models_dir}")
+            # Scan all .py files in models directory
+            for py_file in models_dir.rglob("*.py"):
+                if not py_file.is_file() or "__pycache__" in py_file.parts:
+                    continue
+                try:
+                    stats = get_odoo_model_stats(py_file.read_text(encoding="utf-8"))
+                    if manifestoo_echo_module.verbosity >= 1:
+                        echo.info(f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}")
+                    for model_name, info in stats.items():
+                        score = info.get('score', 0)
+                        if score >= AUTO_EXPAND_THRESHOLD:
+                            if model_name not in expand_models_set:
+                                if manifestoo_echo_module.verbosity >= 1:
+                                    echo.info(f"Auto-expanding model '{model_name}' (score: {score}, fields: {info['fields']}, methods: {info['methods']})")
+                                expand_models_set.add(model_name)
+                        else:
+                            if manifestoo_echo_module.verbosity >= 1:
+                                echo.info(f"Skipping model '{model_name}' - score {score} below threshold {AUTO_EXPAND_THRESHOLD}")
+                except Exception:
+                    continue
+        if manifestoo_echo_module.verbosity >= 1:
+            if expand_models_set:
+                echo.info(f"Auto-expanded {len(expand_models_set)} models: {', '.join(sorted(expand_models_set))}")
+            else:
+                echo.info("Auto-expand: No models met the threshold criteria.")
+
     processed_addons_count = 0
     for addon_to_scan_name in target_addon_names:
         addon_meta = addons_set.get(addon_to_scan_name)
@@ -796,7 +852,8 @@ Conventions:
                     found_files_list.append(addon_dir / "readme" / "USAGE.rst")
 
             processed_addons_count += 1
-            echo.info(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
+            if manifestoo_echo_module.verbosity >= 3:
+                echo.info(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
 
             addon_files = scan_addon_files(
                 addon_dir=addon_dir,
