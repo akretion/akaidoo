@@ -46,7 +46,11 @@ class AkaidooNode:
             typer.echo(f"{indent}{marker}Module: {node.addon_name}", nl=False)
             
             if node.addon_name in seen:
-                typer.secho(" ⬆", dim=True)
+                typer.secho(" ⬆", nl=False, dim=True)
+                if node.addon:
+                    typer.secho(f" [{node.addon.path.resolve()}]", dim=True)
+                else:
+                    typer.echo("")
                 return
             seen.add(node.addon_name)
             typer.echo("")
