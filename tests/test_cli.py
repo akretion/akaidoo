@@ -764,6 +764,25 @@ def test_directory_mode_skips_i18n(tmp_path):
     assert "fr.po" not in result.stdout
     assert "m.py" in result.stdout
 
+def test_list_files_tree_mode(dummy_addons_env):
+    args = [
+        "addon_a",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--tree",
+        "--no-exclude-framework",
+    ]
+    result = _run_cli(args, expected_exit_code=0)
+    # Check for tree symbols and addon names in output
+    assert "addon_a" in result.stdout
+    assert "addon_b" in result.stdout
+    assert "├──" in result.stdout or "└──" in result.stdout
+    assert "models/a_model.py" in result.stdout
+    assert "models/b_model.py" in result.stdout
+
 @pytest.fixture
 def project_structure(tmp_path):
     project_dir = tmp_path / "my_project"
