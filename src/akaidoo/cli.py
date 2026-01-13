@@ -19,7 +19,7 @@ from manifestoo.commands.list_depends import list_depends_command
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from manifestoo.exceptions import CycleErrorExit
-from manifestoo.utils import ensure_odoo_series, print_list
+from manifestoo.utils import ensure_odoo_series, print_list, comma_split
 
 from .shrinker import shrink_python_file
 
@@ -479,7 +479,11 @@ Conventions:
 
     # --- Mode 1: Target is a directory path ---
     potential_path = Path(addon_name)
-    if potential_path.is_dir() and (addon_name.endswith("/") or not (potential_path / "__manifest__.py").is_file()):
+    if (
+        "," not in addon_name
+        and potential_path.is_dir()
+        and (addon_name.endswith("/") or not (potential_path / "__manifest__.py").is_file())
+    ):
         echo.info(
             f"Target '{addon_name}' is a directory. Listing all files recursively.",
             bold=True,
@@ -517,7 +521,11 @@ Conventions:
         raise typer.Exit()
 
     # --- Mode 2: Target is an Odoo addon name (existing logic) ---
-    echo.info(f"Target '{addon_name}' treated as an Odoo addon name.", bold=True)
+    selected_addon_names = set(comma_split(addon_name))
+    echo.info(
+        f"Target(s) '{', '.join(sorted(selected_addon_names))}' treated as Odoo addon name(s).",
+        bold=True,
+    )
 
     m_addons_path = ManifestooAddonsPath()
     if addons_path_str:
@@ -574,14 +582,15 @@ Conventions:
     if exclude_core and not final_odoo_series:
         ensure_odoo_series(final_odoo_series)
 
-    if addon_name not in addons_set:
+    missing_addons = selected_addon_names - set(addons_set.keys())
+    if missing_addons:
         echo.error(
-            f"Addon '{addon_name}' not found in configured Odoo addons paths. "
+            f"Addon(s) '{', '.join(missing_addons)}' not found in configured Odoo addons paths. "
             f"Available: {', '.join(sorted(addons_set)) or 'None'}"
         )
         raise typer.Exit(1)
 
-    selection = AddonsSelection({addon_name})
+    selection = AddonsSelection(selected_addon_names)
     sorter = AddonSorterTopological()
     try:
         dependent_addons, missing = list_depends_command(
@@ -594,7 +603,7 @@ Conventions:
 
     dependent_addons_list = list(dependent_addons)
     echo.info(
-        f"{len(dependent_addons_list)} addons in dependency tree (incl. {addon_name}).",
+        f"{len(dependent_addons_list)} addons in dependency tree (incl. targets).",
         bold=True,
     )
     if manifestoo_echo_module.verbosity >= 2:
@@ -617,13 +626,17 @@ Conventions:
 
     target_addon_names: List[str]
     if only_target_addon:
-        if addon_name in intermediate_target_addons:
-            target_addon_names = [addon_name]
-            echo.info(f"Focusing only on the target addon: {addon_name}", bold=True)
+        target_addon_names = [
+            addon for addon in intermediate_target_addons if addon in selected_addon_names
+        ]
+        if target_addon_names:
+            echo.info(
+                f"Focusing only on the target addon(s): {', '.join(target_addon_names)}",
+                bold=True,
+            )
         else:
-            target_addon_names = []
             echo.warning(
-                f"Target addon '{addon_name}' excluded by other filters. "
+                f"Target addon(s) '{', '.join(selected_addon_names)}' excluded by other filters or dependencies. "
                 "No files processed."
             )
     else:
@@ -828,7 +841,7 @@ Conventions:
                                 ):
                                     if (
                                         shrink_aggressive
-                                        or addon_to_scan_name != addon_name
+                                        or addon_to_scan_name not in selected_addon_names
                                     ):
                                         shrunken_content = shrink_python_file(
                                             str(found_file),

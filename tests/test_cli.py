@@ -588,7 +588,7 @@ def test_list_files_missing_addon(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
     ]
     result = _run_cli(args, expected_exit_code=1)
-    assert "Addon 'non_existent_addon' not found" in result.processed_stderr
+    assert "Addon(s) 'non_existent_addon' not found" in result.processed_stderr
 
 
 def test_trivial_init_skipping(dummy_addons_env):
@@ -667,3 +667,45 @@ def test_list_files_shrink_option(dummy_addons_env, mocker):
 
     elif actual_pyperclip_in_cli_module is None:
         assert "requires the 'pyperclip' library" in result.processed_stderr
+
+def test_list_files_multiple_addons(dummy_addons_env):
+    args = [
+        "addon_a,addon_b",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--separator",
+        ",",
+        "--no-exclude-framework",
+    ]
+    result = _run_cli(args, expected_exit_code=0)
+    output_files = _get_file_names_from_output(result.stdout)
+    # Check that files from both addons are present
+    assert "a_model.py" in output_files
+    assert "b_model.py" in output_files
+
+
+def test_list_files_multiple_addons_shrink(dummy_addons_env, tmp_path):
+    output_file = tmp_path / "out.txt"
+    args = [
+        "addon_a,addon_b",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--shrink",
+        "--output-file",
+        str(output_file),
+        "--no-exclude-framework",
+    ]
+    _run_cli(args, expected_exit_code=0)
+    content = output_file.read_text()
+    
+    # Both should be full because they are both targets
+    assert "class AModel:" in content
+    assert "pass # A's model" in content
+    assert "class BModel:" in content
+    assert "pass # B's model" in content
