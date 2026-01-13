@@ -709,3 +709,50 @@ def test_list_files_multiple_addons_shrink(dummy_addons_env, tmp_path):
     assert "pass # A's model" in content
     assert "class BModel:" in content
     assert "pass # B's model" in content
+
+def test_directory_mode_basic(tmp_path):
+    d = tmp_path / "some_dir"
+    d.mkdir()
+    (d / "file1.py").write_text("print('hello')")
+    (d / "subdir").mkdir()
+    (d / "subdir" / "file2.txt").write_text("world")
+    
+    args = [str(d)]
+    result = _run_cli(args, expected_exit_code=0)
+    # Check that file paths are listed in stdout
+    assert "file1.py" in result.stdout
+    assert "file2.txt" in result.stdout 
+
+def test_directory_mode_trailing_slash_force(tmp_path):
+    d = tmp_path / "my_addon"
+    d.mkdir()
+    (d / "__init__.py").touch()
+    (d / "__manifest__.py").write_text("{'name': 'My Addon'}")
+    (d / "models").mkdir()
+    (d / "models" / "model.py").write_text("class MyModel: pass")
+    
+    addon_path_str = str(d)
+    if addon_path_str.endswith("/"):
+        addon_path_str = addon_path_str[:-1]
+        
+    # Case 1: NO trailing slash -> Should try Odoo mode and fail (exit code 1)
+    result = _run_cli([addon_path_str], expected_exit_code=1) 
+    assert "not found in configured Odoo addons paths" in result.processed_stderr
+
+    # Case 2: WITH trailing slash -> Should be forced to Directory mode
+    result_forced = _run_cli([addon_path_str + "/"], expected_exit_code=0)
+    assert "model.py" in result_forced.stdout
+
+def test_directory_mode_skips_i18n(tmp_path):
+    d = tmp_path / "my_addon_with_i18n"
+    d.mkdir()
+    (d / "__init__.py").touch()
+    (d / "i18n").mkdir()
+    (d / "i18n" / "fr.po").write_text("...")
+    (d / "models").mkdir()
+    (d / "models" / "m.py").write_text("...")
+    
+    args = [str(d) + "/"]
+    result = _run_cli(args, expected_exit_code=0)
+    assert "fr.po" not in result.stdout
+    assert "m.py" in result.stdout
