@@ -735,12 +735,19 @@ def test_directory_mode_trailing_slash_force(tmp_path):
     if addon_path_str.endswith("/"):
         addon_path_str = addon_path_str[:-1]
         
-    # Case 1: NO trailing slash -> Should try Odoo mode and fail (exit code 1)
-    result = _run_cli([addon_path_str], expected_exit_code=1) 
-    assert "not found in configured Odoo addons paths" in result.processed_stderr
+    # Case 1: NO trailing slash -> Treated as "Project Mode" (valid addon path)
+    result = _run_cli([addon_path_str, "-V"], expected_exit_code=0) 
+    # Check logs for "Project Mode" activation
+    # Note: Using result.stdout because test output shows logs there
+    assert "treated as Odoo addon name" in result.stdout
+    assert "Implicitly added addons paths" in result.stdout
+    assert "model.py" in result.stdout
 
-    # Case 2: WITH trailing slash -> Should be forced to Directory mode
-    result_forced = _run_cli([addon_path_str + "/"], expected_exit_code=0)
+    # Case 2: WITH trailing slash -> Forced to Directory Mode
+    result_forced = _run_cli([addon_path_str + "/", "-V"], expected_exit_code=0)
+    # Check logs for Directory Mode activation
+    # Note: Using result.stdout because test output shows logs there
+    assert "is a directory. Listing all files recursively" in result_forced.stdout
     assert "model.py" in result_forced.stdout
 
 def test_directory_mode_skips_i18n(tmp_path):
@@ -756,3 +763,51 @@ def test_directory_mode_skips_i18n(tmp_path):
     result = _run_cli(args, expected_exit_code=0)
     assert "fr.po" not in result.stdout
     assert "m.py" in result.stdout
+
+@pytest.fixture
+def project_structure(tmp_path):
+    project_dir = tmp_path / "my_project"
+    project_dir.mkdir()
+    
+    addon_1 = project_dir / "addon_1"
+    addon_1.mkdir()
+    (addon_1 / "__init__.py").touch()
+    (addon_1 / "__manifest__.py").write_text("{'name': 'Addon 1', 'depends': []}")
+    (addon_1 / "models").mkdir()
+    (addon_1 / "models" / "a1.py").write_text("class A1: pass")
+
+    addon_2 = project_dir / "addon_2"
+    addon_2.mkdir()
+    (addon_2 / "__init__.py").touch()
+    (addon_2 / "__manifest__.py").write_text("{'name': 'Addon 2', 'depends': ['addon_1']}")
+    (addon_2 / "models").mkdir()
+    (addon_2 / "models" / "a2.py").write_text("class A2: pass")
+
+    not_addon = project_dir / "not_an_addon"
+    not_addon.mkdir()
+    (not_addon / "some_file.txt").write_text("hello")
+
+    return project_dir
+
+def test_project_mode_container(project_structure):
+    args = [str(project_structure), "--no-exclude-framework", "-V"]
+    result = _run_cli(args)
+    # Note: Using result.stdout because test output shows logs there, possibly due to CliRunner capture quirks or configuration
+    assert "target(s)" in result.stdout.lower()
+    assert "addon_1/models/a1.py" in result.stdout
+    assert "addon_2/models/a2.py" in result.stdout
+    assert "some_file.txt" not in result.stdout
+
+def test_project_mode_single_path(project_structure):
+    addon_path = project_structure / "addon_1"
+    args = [str(addon_path), "--no-exclude-framework"]
+    result = _run_cli(args)
+    assert "addon_1/models/a1.py" in result.stdout
+    assert "addon_2/models/a2.py" not in result.stdout
+
+def test_project_mode_mixed(project_structure):
+    addon_path = project_structure / "addon_1"
+    args = [f"{addon_path},addon_2", "--no-exclude-framework"]
+    result = _run_cli(args)
+    assert "addon_1/models/a1.py" in result.stdout
+    assert "addon_2/models/a2.py" in result.stdout

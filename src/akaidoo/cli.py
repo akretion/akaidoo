@@ -149,10 +149,10 @@ def process_and_output_files(
         if pyperclip is None:
             echo.error("Clipboard requires 'pyperclip'. Install it and try again.")
             if not output_file_opt:
+                echo.warning("Fallback: File paths:")
                 print_list(
                     [str(p) for p in sorted_file_paths],
                     separator_char,
-                    intro="Fallback: File paths:",
                 )
             raise typer.Exit(1)
         all_content_for_clipboard = []
@@ -180,10 +180,10 @@ def process_and_output_files(
         except Exception as e:  # Catch pyperclip specific errors
             echo.error(f"Clipboard operation failed: {e}")
             if not output_file_opt:
+                echo.warning("Fallback: File paths:")
                 print_list(
                     [str(p) for p in sorted_file_paths],
                     separator_char,
-                    intro="Fallback: File paths:",
                 )
             raise typer.Exit(1)
     elif output_file_opt:
@@ -262,6 +262,85 @@ def scan_extra_scripts(
     return extra_files
 
 
+def expand_inputs(
+    addon_name_input: str,
+) -> tuple[Set[str], Set[Path], bool, Optional[Path]]:
+    """
+    Parses the input string to determine:
+    1. Target addon names (explicit or discovered from paths).
+    2. Implicit addons paths (directories containing the discovered addons).
+    3. Whether to force directory mode (if input is a single path ending in /).
+    4. The directory path for directory mode.
+    """
+    raw_inputs = comma_split(addon_name_input)
+    selected_addon_names = set()
+    implicit_addons_paths = set()
+
+    # Check for forced directory mode (Mode 1)
+    # If single input, is a directory, and ends with separator OR is not an addon
+    if len(raw_inputs) == 1:
+        path_str = raw_inputs[0]
+        potential_path = Path(path_str)
+        is_dir = potential_path.is_dir()
+        ends_with_sep = path_str.endswith(os.path.sep)
+        has_manifest = (potential_path / "__manifest__.py").is_file()
+        
+        if is_dir and (ends_with_sep or not has_manifest):
+            # Special case: It's a directory scan request
+            # Unless it's a container of addons and user DID NOT force slash?
+            # User requirement: "akaidoo some_dir" -> concat content (recursively) if not an addon?
+            # But "project mode" says: "akaidoo ./custom_addons" -> select all addons inside.
+            # Conflict: ./custom_addons (container) vs ./some_dir (just files).
+            # Heuristic: If it contains addons (subdirs with manifests), treat as project mode.
+            # If forced with slash, treat as directory mode.
+            
+            if ends_with_sep:
+                return set(), set(), True, potential_path
+            
+            # Check if container
+            has_sub_addons = any((sub / "__manifest__.py").is_file() for sub in potential_path.iterdir() if sub.is_dir())
+            if not has_sub_addons:
+                 return set(), set(), True, potential_path
+
+    # Project/Addon Mode (Mode 2)
+    for item in raw_inputs:
+        path = Path(item)
+        if path.is_dir():
+            # Case A: Path to an addon
+            if (path / "__manifest__.py").is_file():
+                # Addon found by path
+                # Use directory name as addon name (standard convention)
+                name = path.name
+                selected_addon_names.add(name)
+                implicit_addons_paths.add(path.parent.resolve())
+            else:
+                # Case B: Path to a container of addons
+                found_any = False
+                for sub in path.iterdir():
+                    if sub.is_dir() and (sub / "__manifest__.py").is_file():
+                        selected_addon_names.add(sub.name)
+                        found_any = True
+                
+                if found_any:
+                    implicit_addons_paths.add(path.resolve())
+                else:
+                    # It's a directory path but not an addon and no addons inside?
+                    # Treat as simple name? Or warn?
+                    # If it was part of a comma list, assume user meant it as a name if no path found.
+                    # But path.is_dir() is true. So it's just a folder with no addons.
+                    # Ignore or warn. Let's ignore path expansion and treat as name? 
+                    # No, if it exists as a dir, it shouldn't be treated as an addon name unless it IS one.
+                    # Let's assume user made a mistake or it's a weird input.
+                    # For now, if we found nothing, maybe just add it as a name fallback?
+                    if not found_any:
+                         selected_addon_names.add(item)
+        else:
+            # Simple name
+            selected_addon_names.add(item)
+
+    return selected_addon_names, implicit_addons_paths, False, None
+
+
 def resolve_addons_selection(
     selected_addon_names: Set[str],
     addons_set: AddonsSet,
@@ -285,7 +364,8 @@ def resolve_addons_selection(
         bold=True,
     )
     if manifestoo_echo_module.verbosity >= 2:
-        print_list(dependent_addons_list, ", ", intro="Dependency list: ")
+        echo.info("Dependency list: ", nl=False)
+        print_list(dependent_addons_list, ", ")
 
     if exclude_core:
         ensure_odoo_series(final_odoo_series)
@@ -558,23 +638,28 @@ Conventions:
         introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
-    # --- Mode 1: Target is a directory path ---
-    potential_path = Path(addon_name)
-    if (
-        "," not in addon_name
-        and potential_path.is_dir()
-        and (addon_name.endswith("/") or not (potential_path / "__manifest__.py").is_file())
-    ):
+    # Expand inputs (Project Mode / Smart Path)
+    (
+        selected_addon_names,
+        implicit_addons_paths,
+        force_directory_mode,
+        directory_mode_path,
+    ) = expand_inputs(addon_name)
+
+    # --- Mode 1: Directory Mode ---
+    if force_directory_mode and directory_mode_path:
         echo.info(
-            f"Target '{addon_name}' is a directory. Listing all files recursively.",
+            f"Target '{directory_mode_path}' is a directory. Listing all files recursively.",
             bold=True,
         )
-        if not potential_path.is_absolute():
-            potential_path = potential_path.resolve()
-            echo.debug(f"Resolved relative path to: {potential_path}")
+        if not directory_mode_path.is_absolute():
+            directory_mode_path = directory_mode_path.resolve()
+            echo.debug(f"Resolved relative path to: {directory_mode_path}")
 
-        found_files_list = scan_directory_files(potential_path)
-        echo.info(f"Found {len(found_files_list)} files in directory {potential_path}.")
+        found_files_list = scan_directory_files(directory_mode_path)
+        echo.info(
+            f"Found {len(found_files_list)} files in directory {directory_mode_path}."
+        )
 
         process_and_output_files(
             found_files_list,
@@ -589,8 +674,7 @@ Conventions:
         )
         raise typer.Exit()
 
-    # --- Mode 2: Target is an Odoo addon name (existing logic) ---
-    selected_addon_names = set(comma_split(addon_name))
+    # --- Mode 2: Odoo Addon Mode (Project Mode) ---
     echo.info(
         f"Target(s) '{', '.join(sorted(selected_addon_names))}' treated as Odoo addon name(s).",
         bold=True,
@@ -602,11 +686,18 @@ Conventions:
         addons_path_python,
         odoo_cfg,
     )
+    
+    # Add implicit paths discovered from arguments
+    if implicit_addons_paths:
+        m_addons_path.extend_from_addons_dirs(implicit_addons_paths)
+        echo.info(
+            f"Implicitly added addons paths: {', '.join(str(p) for p in implicit_addons_paths)}"
+        )
 
-    if not m_addons_path and not potential_path.is_dir():
+    if not m_addons_path:
         echo.error(
             "Could not determine addons path for Odoo mode. "
-            "Please provide one via --addons-path or --odoo-cfg."
+            "Please provide one via --addons-path or --odoo-cfg, or provide a path to an addon/container."
         )
         raise typer.Exit(1)
 
@@ -617,7 +708,7 @@ Conventions:
     if m_addons_path:
         addons_set.add_from_addons_dirs(m_addons_path)
 
-    if not addons_set and not potential_path.is_dir():
+    if not addons_set:
         echo.error("No addons found in the specified addons path(s) for Odoo mode.")
         raise typer.Exit(1)
 
