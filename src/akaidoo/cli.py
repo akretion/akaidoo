@@ -63,6 +63,7 @@ FRAMEWORK_ADDONS = (
     "product",
 )
 
+PARENT_CHILD_AUTO_EXPAND = True
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
 
 
@@ -884,6 +885,23 @@ Conventions:
         if manifestoo_echo_module.verbosity >= 1:
             echo.info(f"Added {len(add_expand_set)} models to expand set: {', '.join(sorted(add_expand_set))}")
 
+    if PARENT_CHILD_AUTO_EXPAND and expand_models_set:
+        enriched_additions = set()
+        for m in list(expand_models_set):
+            if m.endswith(".line"):
+                parent = m[:-5]
+                if parent and parent not in expand_models_set:
+                    enriched_additions.add(parent)
+            else:
+                child = f"{m}.line"
+                if child not in expand_models_set:
+                    enriched_additions.add(child)
+        
+        if enriched_additions:
+            expand_models_set.update(enriched_additions)
+            if manifestoo_echo_module.verbosity >= 1:
+                echo.info(f"Enriched parent/child models ({len(enriched_additions)}): {', '.join(sorted(enriched_additions))}")
+
     processed_addons_count = 0
     for addon_to_scan_name in target_addon_names:
         addon_meta = addons_set.get(addon_to_scan_name)
@@ -984,6 +1002,10 @@ Conventions:
         for m in expand_models_set:
             if m in all_relations:
                 related_models_set.update(all_relations[m])
+        
+        new_related = related_models_set - expand_models_set
+        if new_related and manifestoo_echo_module.verbosity >= 1:
+             echo.info(f"Related models (not in expanded) ({len(new_related)}): {', '.join(sorted(new_related))}")
                 
         relevant_models = expand_models_set | related_models_set
         
