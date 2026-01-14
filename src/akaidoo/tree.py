@@ -85,14 +85,10 @@ class AkaidooNode:
             else:
                 content_indent = indent + ("    " if is_last else "│   ")
             
-            # 2. Path Header (Only show path for pruned, or everything? "only its PATH")
-            # If pruned, we still show path.
-            if node.addon:
-                if is_pruned:
-                    typer.secho(f"{content_indent}Path: {node.addon.path.resolve()}", dim=True)
-                else:
-                    typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
-            else:
+            # 2. Path Header
+            if node.addon and not is_pruned:
+                typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
+            elif not node.addon:
                 typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
             has_files = len(node.files) > 0 and not is_pruned # Hide files if pruned
