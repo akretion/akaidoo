@@ -25,9 +25,10 @@ def get_odoo_structure(addon_name: str, recursive: bool = True) -> str:
         root_addon_names=context.selected_addon_names,
         addons_set=context.addons_set,
         addon_files_map=context.addon_files_map,
-        odoo_series=context.final_odoo_series,
-        exclude_core=context.exclude_core,
-        fold_framework_addons=context.exclude_framework,
+# commented out because arguments mismatch here:
+#        odoo_series=context.final_odoo_series,
+#        exclude_core=context.exclude_core,
+#        fold_framework_addons=context.exclude_framework,
         framework_addons=FRAMEWORK_ADDONS,
         pruned_addons=context.pruned_addons,
     )
