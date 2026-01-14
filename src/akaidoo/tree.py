@@ -38,8 +38,11 @@ class AkaidooNode:
         fold_core_addons: bool,
         fold_framework_addons: bool = False,
         framework_addons: Iterable[str] = (),
+        pruned_addons: Dict[str, str] = None,
     ) -> None:
         seen: Set[str] = set()
+        if pruned_addons is None:
+            pruned_addons = {}
 
         def _print(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
             # Choose marker for this module node
@@ -48,8 +51,15 @@ class AkaidooNode:
             else:
                 marker = "└── " if is_last else "├── "
             
+            # Check pruning status
+            pruning_reason = pruned_addons.get(node.addon_name)
+            is_pruned = pruning_reason is not None
+            
             # 1. Module Header
-            typer.echo(f"{indent}{marker}Module: {node.addon_name}", nl=False)
+            if is_pruned:
+                typer.secho(f"{indent}{marker}Module: {node.addon_name}", nl=False, dim=True)
+            else:
+                typer.echo(f"{indent}{marker}Module: {node.addon_name}", nl=False)
             
             if node.addon_name in seen:
                 typer.secho(" ⬆", nl=False, dim=True)
@@ -59,6 +69,14 @@ class AkaidooNode:
                     typer.echo("")
                 return
             seen.add(node.addon_name)
+            
+            # Pruning tags
+            if is_pruned:
+                if pruning_reason == "framework":
+                    typer.secho(" [pruned (framework)]", nl=False, dim=True)
+                else:
+                    typer.secho(" [pruned]", nl=False, dim=True)
+
             typer.echo("")
             
             # Determine indentation for contents and children of this module
@@ -67,13 +85,17 @@ class AkaidooNode:
             else:
                 content_indent = indent + ("    " if is_last else "│   ")
             
-            # 2. Path Header
+            # 2. Path Header (Only show path for pruned, or everything? "only its PATH")
+            # If pruned, we still show path.
             if node.addon:
-                typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
+                if is_pruned:
+                    typer.secho(f"{content_indent}Path: {node.addon.path.resolve()}", dim=True)
+                else:
+                    typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
             else:
                 typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
-            has_files = len(node.files) > 0
+            has_files = len(node.files) > 0 and not is_pruned # Hide files if pruned
             
             # Check for folding
             is_core = is_core_addon(node.addon_name, odoo_series)
@@ -81,6 +103,8 @@ class AkaidooNode:
             
             should_fold = (fold_core_addons and is_core) or (fold_framework_addons and is_framework)
             
+            # If pruned, we act as if we show children (to show structure), unless folded?
+            # Pruning is a form of folding content, but structure remains.
             has_children = len(node.children) > 0 and not should_fold
             
             # 3. Print Files
@@ -141,6 +165,7 @@ def print_akaidoo_tree(
     fold_core_addons: bool,
     fold_framework_addons: bool = False,
     framework_addons: Iterable[str] = (),
+    pruned_addons: Dict[str, str] = None,
 ):
     nodes: Dict[NodeKey, AkaidooNode] = {}
 
@@ -169,4 +194,5 @@ def print_akaidoo_tree(
             fold_core_addons,
             fold_framework_addons=fold_framework_addons,
             framework_addons=framework_addons,
+            pruned_addons=pruned_addons,
         )
