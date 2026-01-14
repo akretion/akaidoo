@@ -64,6 +64,7 @@ FRAMEWORK_ADDONS = (
 )
 
 PARENT_CHILD_AUTO_EXPAND = True
+BLACKLIST_AUTO_EXPAND = {"res.config.settings"}
 TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
 
 
@@ -863,6 +864,10 @@ Conventions:
                         score = info.get('score', 0)
                         if score >= AUTO_EXPAND_THRESHOLD:
                             if model_name not in expand_models_set:
+                                if model_name in BLACKLIST_AUTO_EXPAND:
+                                    if manifestoo_echo_module.verbosity >= 1:
+                                        echo.info(f"Skipping model '{model_name}' - blacklisted from auto-expand")
+                                    continue
                                 if manifestoo_echo_module.verbosity >= 1:
                                     echo.info(f"Auto-expanding model '{model_name}' (score: {score}, fields: {info['fields']}, methods: {info['methods']})")
                                 expand_models_set.add(model_name)
@@ -890,11 +895,11 @@ Conventions:
         for m in list(expand_models_set):
             if m.endswith(".line"):
                 parent = m[:-5]
-                if parent and parent not in expand_models_set:
+                if parent and parent not in expand_models_set and parent not in BLACKLIST_AUTO_EXPAND:
                     enriched_additions.add(parent)
             else:
                 child = f"{m}.line"
-                if child not in expand_models_set:
+                if child not in expand_models_set and child not in BLACKLIST_AUTO_EXPAND:
                     enriched_additions.add(child)
         
         if enriched_additions:
