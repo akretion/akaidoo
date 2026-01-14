@@ -5,6 +5,8 @@ from manifestoo_core.addons_set import Addon
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from .shrinker import shrink_python_file
+from .utils import get_file_odoo_models
+
 
 BINARY_EXTS = (
     ".png",
@@ -60,7 +62,7 @@ def scan_directory_files(directory_path: Path) -> List[Path]:
 def scan_addon_files(
     addon_dir: Path,
     addon_name: str,
-    target_addon_names: Set[str],
+    selected_addon_names: Set[str],
     include_models: bool = True,
     include_views: bool = True,
     include_wizards: bool = True,
@@ -70,16 +72,17 @@ def scan_addon_files(
     only_views: bool = False,
     exclude_framework: bool = True,
     framework_addons: tuple = (),
-    shrink: bool = False,
-    shrink_aggressive: bool = False,
-    expand_models_set: Set[str] = None,
-    shrunken_files_content: Dict[Path, str] = None,
+    shrink_mode: str = "none",
+    expand_models_set: Optional[Set[str]] = None,
+    shrunken_files_content: Optional[Dict[Path, str]] = None,
+    relevant_models: Optional[Set[str]] = None,
 ) -> List[Path]:
     """Scan an Odoo addon directory for relevant files based on filters."""
     found_files = []
     shrunken_files_content = shrunken_files_content if shrunken_files_content is not None else {}
-    expand_models_set = expand_models_set or set()
-    
+    expand_models_set = expand_models_set if expand_models_set is not None else set()
+    relevant_models = relevant_models if relevant_models is not None else set()
+
     scan_roots: List[str] = []
     if only_models:
         scan_roots.append("models")
@@ -204,14 +207,42 @@ def scan_addon_files(
 
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
-                    if (shrink or shrink_aggressive) and found_file.suffix == ".py":
-                        if shrink_aggressive or addon_name not in target_addon_names:
+                    if shrink_mode != "none" and found_file.suffix == ".py":
+                        file_models = get_file_odoo_models(abs_file_path)
+                        file_is_relevant = any(
+                            model in relevant_models
+                            for model in file_models
+                        )
+                        file_in_target_addon = addon_name in selected_addon_names
+
+                        should_shrink = False
+                        aggressive = False
+
+                        if shrink_mode == "soft":
+                            should_shrink = not file_in_target_addon
+                            aggressive = False
+
+                        elif shrink_mode == "medium":
+                            if file_is_relevant and file_in_target_addon:
+                                should_shrink = False
+                            elif file_is_relevant:
+                                should_shrink = True
+                                aggressive = False
+                            else:
+                                should_shrink = True
+                                aggressive = True
+
+                        elif shrink_mode == "hard":
+                            should_shrink = True
+                            aggressive = True
+
+                        if should_shrink:
                             shrunken_content = shrink_python_file(
                                 str(found_file),
-                                aggressive=shrink_aggressive,
+                                aggressive=aggressive,
                                 expand_models=expand_models_set,
                             )
                             shrunken_files_content[abs_file_path] = shrunken_content
                     found_files.append(abs_file_path)
-    
+
     return found_files

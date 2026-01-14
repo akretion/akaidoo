@@ -33,6 +33,9 @@ from .scanner import (
 )
 from .tree import print_akaidoo_tree
 
+PRUNE_MODES = ["none", "soft", "medium", "hard"]
+SHRINK_MODES = ["none", "soft", "medium", "hard"]
+
 try:
     from importlib import metadata
 except ImportError:
@@ -83,7 +86,8 @@ class AkaidooContext:
     exclude_framework: bool
     expand_models_set: Set[str]
     diffs: List[str]
-
+    shrink_mode: str = "none"
+    prune_mode: str = "soft"
 
 def version_callback_for_run(value: bool):
     if value:
@@ -459,14 +463,13 @@ def resolve_akaidoo_context(
     only_views: bool = False,
     exclude_core: bool = False,
     exclude_framework: bool = True,
-    shrink: bool = False,
-    shrink_aggressive: bool = False,
+    shrink_mode: str = "none",
     expand_models_str: Optional[str] = None,
     auto_expand: bool = True,
     focus_models_str: Optional[str] = None,
     add_expand_str: Optional[str] = None,
-    prune: bool = True,
-    only_target_addon: bool = False,
+    rm_expand_str: Optional[str] = None,
+    prune_mode: str = "soft",
 ) -> AkaidooContext:
     found_files_list: List[Path] = []
     addon_files_map: Dict[str, List[Path]] = {}
@@ -475,10 +478,52 @@ def resolve_akaidoo_context(
     expand_models_set = set()
 
     if expand_models_str:
-        if not (shrink or shrink_aggressive):
-            echo.info("Option --expand provided: implying --shrink (-s).")
-            shrink = True
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
+
+    focus_models_set: set[str] = set()
+    add_expand_set: set[str] = set()
+    rm_expand_set: set[str] = set()
+
+    if rm_expand_str:
+        rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
+
+    # If focus models are provided, auto-expand is disabled automatically
+    if focus_models_str and auto_expand:
+        auto_expand = False
+
+    focus_modes_count = sum([bool(focus_models_str), bool(add_expand_str), auto_expand])
+    if focus_modes_count > 1:
+        focus_flags = [
+            name
+            for flag, name in [
+                (focus_models_str, "--focus-models"),
+                (add_expand_str, "--add-expand"),
+                (auto_expand, "--auto-expand"),
+            ]
+            if flag
+        ]
+        echo.error(
+            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
+            "Use either --focus-models, --add-expand, or --auto-expand."
+        )
+        raise typer.Exit(1)
+
+    if focus_models_str:
+        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
+        auto_expand = False
+        expand_models_set = focus_models_set.copy()
+    elif add_expand_str:
+        add_expand_set = {m.strip() for m in add_expand_str.split(",")}
+    elif auto_expand:
+        pass
+
+    # Apply rm_expand
+    if rm_expand_set:
+        expand_models_set = expand_models_set - rm_expand_set
+        if rm_expand_set and manifestoo_echo_module.verbosity >= 1:
+            echo.info(
+                f"Removed {len(rm_expand_set)} models from auto-expand set: {', '.join(sorted(rm_expand_set))}"
+            )
 
     focus_models_set: set[str] = set()
     add_expand_set: set[str] = set()
@@ -508,20 +553,10 @@ def resolve_akaidoo_context(
         focus_models_set = {m.strip() for m in focus_models_str.split(",")}
         auto_expand = False
         expand_models_set = focus_models_set.copy()
-        if not (shrink or shrink_aggressive):
-            echo.info("Option --focus-models provided: implying --shrink (-s).")
-            shrink = True
     elif add_expand_str:
         add_expand_set = {m.strip() for m in add_expand_str.split(",")}
-        if auto_expand and not (shrink or shrink_aggressive):
-            echo.info(
-                "Option --add-expand provided with --auto-expand: implying --shrink (-s)."
-            )
-            shrink = True
     elif auto_expand:
-        if not (shrink or shrink_aggressive):
-            echo.info("Option --auto-expand enabled by default: implying --shrink (-s).")
-            shrink = True
+        pass
 
     # Expand inputs (Project Mode / Smart Path)
     (
@@ -636,7 +671,7 @@ def resolve_akaidoo_context(
     )
 
     target_addon_names: List[str]
-    if only_target_addon:
+    if prune_mode == "hard":
         target_addon_names = [
             addon
             for addon in intermediate_target_addons
@@ -733,7 +768,7 @@ def resolve_akaidoo_context(
                 f"Added {len(add_expand_set)} models to expand set: {', '.join(sorted(add_expand_set))}"
             )
 
-    if PARENT_CHILD_AUTO_EXPAND and expand_models_set:
+    if PARENT_CHILD_AUTO_EXPAND and expand_models_set and prune_mode == "soft":
         enriched_additions = set()
         for m in list(expand_models_set):
             if m.endswith(".line"):
@@ -794,7 +829,7 @@ def resolve_akaidoo_context(
             addon_files = scan_addon_files(
                 addon_dir=addon_dir,
                 addon_name=addon_to_scan_name,
-                target_addon_names=selected_addon_names,
+                selected_addon_names=selected_addon_names,
                 include_models=include_models,
                 include_views=include_views,
                 include_wizards=include_wizards,
@@ -804,10 +839,10 @@ def resolve_akaidoo_context(
                 only_views=only_views,
                 exclude_framework=exclude_framework,
                 framework_addons=FRAMEWORK_ADDONS,
-                shrink=shrink,
-                shrink_aggressive=shrink_aggressive,
+                shrink_mode=shrink_mode,
                 expand_models_set=expand_models_set,
                 shrunken_files_content=shrunken_files_content,
+                relevant_models=relevant_models,
             )
             addon_files_map[addon_to_scan_name] = addon_files
             for f in addon_files:
@@ -828,7 +863,7 @@ def resolve_akaidoo_context(
 
     # --- Smart Pruning ---
     pruned_addons: Dict[str, str] = {}
-    if prune and target_addon_names:
+    if prune_mode != "none" and target_addon_names:
         echo.info("Analyzing models for smart pruning...", bold=True)
 
         all_relations: Dict[str, Set[str]] = {}
@@ -854,17 +889,21 @@ def resolve_akaidoo_context(
                     except Exception:
                         pass
 
-        # 2. Derive Related Models
+        # 2. Derive Related Models based on prune_mode
         related_models_set = set()
-        for m in expand_models_set:
-            if m in all_relations:
-                related_models_set.update(all_relations[m])
-
-        new_related = related_models_set - expand_models_set
-        if new_related and manifestoo_echo_module.verbosity >= 1:
-            echo.info(
-                f"Related models (not in expanded) ({len(new_related)}): {', '.join(sorted(new_related))}"
-            )
+        if prune_mode == "soft":
+            # Soft: Expand + Parent/Child + Related
+            for m in expand_models_set:
+                if m in all_relations:
+                    related_models_set.update(all_relations[m])
+            new_related = related_models_set - expand_models_set
+            if new_related and manifestoo_echo_module.verbosity >= 1:
+                echo.info(
+                    f"Related models (not in expanded) ({len(new_related)}): {', '.join(sorted(new_related))}"
+                )
+        elif prune_mode == "medium":
+            # Medium: Expanded only, no P/C or related
+            pass
 
         relevant_models = expand_models_set | related_models_set
 
@@ -1117,23 +1156,23 @@ def akaidoo_command_entrypoint(
     separator: str = typer.Option(
         "\n", "--separator", help="Separator character between filenames."
     ),
-    shrink: bool = typer.Option(
-        False,
+    shrink_mode: str = typer.Option(
+        "none",
         "--shrink",
-        "-s",
-        help="Shrink dependency Python files to essentials (classes, methods, fields).",
-    ),
-    shrink_aggressive: bool = typer.Option(
-        False,
-        "--shrink-aggressive",
-        "-S",
-        help="Enable aggressive shrinking, removing method bodies entirely.",
+        help="Shrink mode: none (no shrink), soft (deps shrunk with 'pass # shrunk', targets full), medium (relevant: soft in deps/none in targets, irrelevant: hard everywhere), hard (all methods removed).",
+        case_sensitive=False,
     ),
     expand_models_str: Optional[str] = typer.Option(
         None,
         "--expand",
         "-E",
         help="Comma-separated list of Odoo models to fully expand even when shrinking.",
+        show_default=False,
+    ),
+    rm_expand_str: Optional[str] = typer.Option(
+        None,
+        "--rm-expand",
+        help="Remove models from auto-expand set. Comma-separated list.",
         show_default=False,
     ),
     auto_expand: bool = typer.Option(
@@ -1178,17 +1217,11 @@ def akaidoo_command_entrypoint(
         "--editor-cmd",
         help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'.",
     ),
-    prune: bool = typer.Option(
-        True,
-        "--prune/--no-prune",
-        help="Prune modules that do not contain relevant models (expanded models + their relations).",
-    ),
-    only_target_addon: bool = typer.Option(
-        False,
-        "--only-target-addon",
-        "-l",
-        help="Only list files from the target addon.",
-        show_default=False,
+    prune_mode: str = typer.Option(
+        "soft",
+        "--prune",
+        help="Prune mode: none (keep all), soft (expanded + parent/child + related), medium (expanded only), hard (target addons only).",
+        case_sensitive=False,
     ),
 ):
     manifestoo_echo_module.verbosity = (
@@ -1215,14 +1248,13 @@ def akaidoo_command_entrypoint(
         only_views=only_views,
         exclude_core=exclude_core,
         exclude_framework=exclude_framework,
-        shrink=shrink,
-        shrink_aggressive=shrink_aggressive,
+        shrink_mode=shrink_mode,
         expand_models_str=expand_models_str,
         auto_expand=auto_expand,
         focus_models_str=focus_models_str,
         add_expand_str=add_expand_str,
-        prune=prune,
-        only_target_addon=only_target_addon,
+        rm_expand_str=rm_expand_str,
+        prune_mode=prune_mode,
     )
 
     cmd_call = shlex.join(sys.argv)
@@ -1232,10 +1264,10 @@ Command: {cmd_call}
 Conventions:
 1. Files start with `# FILEPATH: [path]`.
 2. Some files were filtered out to save tokens; ask for them if you need."""
-    if shrink:
+    if shrink_mode != "none":
         introduction += """
 3. `# shrunk` indicates code removed to save tokens; ask for full content if a specific logic flow is unclear."""
-    if shrink_aggressive:
+    if shrink_mode == "hard":
         introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
