@@ -96,6 +96,114 @@ def _get_odoo_model_name_from_body(body_node, code_bytes: bytes) -> Optional[str
                         return val.strip("'\"") 
     return None
 
+
+def get_model_relations(code: str) -> Dict[str, Set[str]]:
+    """
+    Scans Python code and returns a dictionary mapping model names defined/extended in the code
+    to a set of related model names (parents from _inherit/_inherits and comodels from relational fields).
+    """
+    code_bytes = bytes(code, "utf8")
+    tree = parser.parse(code_bytes)
+    root_node = tree.root_node
+
+    relations: Dict[str, Set[str]] = {}
+
+    def scan_node(node):
+        if node.type == "class_definition":
+            body = node.child_by_field_name("body")
+            if body:
+                # 1. Identify the model(s) being defined/extended
+                current_models = set()
+                parents = set()
+
+                # Scan for _name, _inherit, _inherits
+                for child in body.children:
+                    if child.type == "expression_statement":
+                        assign = child.child(0)
+                        if assign and assign.type == "assignment":
+                            left = assign.child_by_field_name("left")
+                            right = assign.child_by_field_name("right")
+
+                            if left and left.type == "identifier":
+                                var_name = code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+
+                                if var_name == "_name":
+                                    if right.type == "string":
+                                        val = code_bytes[right.start_byte : right.end_byte].decode("utf-8")
+                                        current_models.add(val.strip("'\""))
+
+                                elif var_name == "_inherit":
+                                    if right.type == "string":
+                                        val = code_bytes[right.start_byte : right.end_byte].decode("utf-8")
+                                        parents.add(val.strip("'\""))
+                                    elif right.type == "list":
+                                        for element in right.children:
+                                            if element.type == "string":
+                                                val = code_bytes[element.start_byte : element.end_byte].decode("utf-8")
+                                                parents.add(val.strip("'\""))
+
+                                elif var_name == "_inherits":
+                                    # _inherits = {'a.model': 'field_id'}
+                                    if right.type == "dictionary":
+                                        for pair in right.children:
+                                            if pair.type == "pair":
+                                                key = pair.child_by_field_name("key")
+                                                if key and key.type == "string":
+                                                    val = code_bytes[key.start_byte : key.end_byte].decode("utf-8")
+                                                    parents.add(val.strip("'\""))
+
+                # If _name is present, that's the primary model.
+                # If only _inherit is present, we are extending those models.
+                target_models = current_models if current_models else parents
+                if not target_models:
+                    # Not an Odoo model class or weird structure
+                    return
+
+                # Initialize relations for these models
+                for m in target_models:
+                    if m not in relations:
+                        relations[m] = set()
+                    relations[m].update(parents)
+
+                # 2. Scan for fields to find comodels
+                for child in body.children:
+                    if child.type == "expression_statement":
+                        assign = child.child(0)
+                        if assign and assign.type == "assignment":
+                            right = assign.child_by_field_name("right")
+                            
+                            if right and right.type == "call":
+                                func = right.child_by_field_name("function")
+                                if func and func.type == "attribute":
+                                    obj = func.child_by_field_name("object")
+                                    attr = func.child_by_field_name("attribute")
+
+                                    if obj and obj.type == "identifier" and attr and attr.type == "identifier":
+                                        obj_name = code_bytes[obj.start_byte : obj.end_byte].decode("utf-8")
+                                        attr_name = code_bytes[attr.start_byte : attr.end_byte].decode("utf-8")
+
+                                        if obj_name in ("fields", "models") and attr_name in ("Many2one", "One2many", "Many2many"):
+                                            # Extract first argument
+                                            args = right.child_by_field_name("arguments")
+                                            if args:
+                                                for arg in args.children:
+                                                    if arg.type == "string":
+                                                        val = code_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
+                                                        comodel = val.strip("'\"")
+                                                        for m in target_models:
+                                                            relations[m].add(comodel)
+                                                        break
+                                                    elif arg.type in ("identifier", "attribute", "call", "integer", "float"):
+                                                        # First arg might not be a string (e.g. variable or number), skip
+                                                        break
+
+        for child in node.children:
+            scan_node(child)
+
+    scan_node(root_node)
+    return relations
+
+
 def get_file_odoo_models(path: Path) -> Set[str]:
     """Read file and extract Odoo model names (Legacy helper for tree output)."""
     try:

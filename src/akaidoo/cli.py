@@ -22,7 +22,7 @@ from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list, comma_split
 
 from .shrinker import shrink_python_file
-from .utils import get_file_odoo_models, get_odoo_model_stats, AUTO_EXPAND_THRESHOLD
+from .utils import get_file_odoo_models, get_odoo_model_stats, get_model_relations, AUTO_EXPAND_THRESHOLD
 from .scanner import (
     BINARY_EXTS,
     is_trivial_init_py,
@@ -616,6 +616,11 @@ def akaidoo_command_entrypoint(
         "--editor-cmd",
         help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'.",
     ),
+    prune: bool = typer.Option(
+        True,
+        "--prune/--no-prune",
+        help="Prune modules that do not contain relevant models (expanded models + their relations).",
+    ),
     only_target_addon: bool = typer.Option(
         False,
         "--only-target-addon",
@@ -946,6 +951,74 @@ Conventions:
             if f not in found_files_list:
                 found_files_list.append(f)
 
+    # --- Smart Pruning ---
+    pruned_addons: Dict[str, str] = {}
+    if prune and target_addon_names:
+        echo.info("Analyzing models for smart pruning...", bold=True)
+        
+        all_relations: Dict[str, Set[str]] = {}
+        addon_models: Dict[str, Set[str]] = {}
+        
+        # 1. Build Model Map from ALL scanned files
+        for addon_name_iter, files in addon_files_map.items():
+            addon_models[addon_name_iter] = set()
+            for f in files:
+                if f.suffix == '.py' and "__init__.py" not in f.name:
+                    try:
+                        # Optimization: we could use shrunken content if available and reliable, 
+                        # but getting relations requires field definitions which might be preserved.
+                        # However, to be safe and accurate, we read the original file.
+                        content = f.read_text(encoding="utf-8")
+                        rels = get_model_relations(content)
+                        if rels:
+                            addon_models[addon_name_iter].update(rels.keys())
+                            for m, r in rels.items():
+                                if m not in all_relations:
+                                    all_relations[m] = set()
+                                all_relations[m].update(r)
+                    except Exception:
+                        pass
+        
+        # 2. Derive Related Models
+        related_models_set = set()
+        for m in expand_models_set:
+            if m in all_relations:
+                related_models_set.update(all_relations[m])
+                
+        relevant_models = expand_models_set | related_models_set
+        
+        if manifestoo_echo_module.verbosity >= 2:
+             echo.info(f"Relevant models ({len(relevant_models)}): {', '.join(sorted(relevant_models))}")
+
+        # 3. Determine Pruned Addons
+        files_to_remove = set()
+        
+        for addon in target_addon_names:
+            reason = None
+            if addon in FRAMEWORK_ADDONS:
+                 reason = "framework"
+            else:
+                 # Check if addon contains any relevant model (defined or extended)
+                 if not (addon_models.get(addon, set()) & relevant_models):
+                     reason = "no_relevant_models"
+            
+            if reason:
+                pruned_addons[addon] = reason
+                if manifestoo_echo_module.verbosity >= 1:
+                    echo.info(f"Pruning addon '{addon}' ({reason})")
+                
+                # Mark files for removal (keep manifest)
+                addon_files = addon_files_map.get(addon, [])
+                for f in addon_files:
+                    if f.name != "__manifest__.py":
+                        files_to_remove.add(f)
+        
+        # Apply removal
+        if files_to_remove:
+            original_count = len(found_files_list)
+            found_files_list = [f for f in found_files_list if f not in files_to_remove]
+            echo.info(f"Pruned {len(pruned_addons)} addons, removed {original_count - len(found_files_list)} files.")
+
     echo.info(f"Found {len(found_files_list)} total files.", bold=True)
 
     if (
@@ -960,6 +1033,7 @@ Conventions:
             exclude_core,
             fold_framework_addons=exclude_framework,
             framework_addons=FRAMEWORK_ADDONS,
+            pruned_addons=pruned_addons,
         )
     else:
         process_and_output_files(
