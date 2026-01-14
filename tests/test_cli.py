@@ -1075,6 +1075,16 @@ def test_pruning_logic_integrated(pruning_env):
     args = ["target_addon", "--addons-path", str(pruning_env), "--prune", "--auto-expand"]
     result = _run_cli(args, expected_exit_code=0)
     
+    # It might log related models if model.b is not auto-expanded (it has no fields in setup, so score low)
+    # But wait, verbosity default? _run_cli sets verbosity? 
+    # akaidoo default verbosity is 0. 
+    # My new code logs at verbosity >= 1.
+    # The test passes --auto-expand which implies --shrink.
+    # I need -V or --verbose to see the logs.
+    
+    # We constructed args manually. We didn't pass -V.
+    # So we probably won't see the logs unless we add -V.
+    
     assert "target_addon" in result.stdout
     assert "models/model_a.py" in result.stdout
     
