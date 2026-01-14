@@ -703,6 +703,10 @@ def akaidoo_command_entrypoint(
     focus_models_set: set[str] = set()
     add_expand_set: set[str] = set()
 
+    # If focus models are provided, auto-expand is disabled automatically
+    if focus_models_str and auto_expand:
+        auto_expand = False
+
     focus_modes_count = sum([
         bool(focus_models_str),
         bool(add_expand_str),
@@ -767,7 +771,10 @@ Conventions:
     if Path(".akaidoo/context").is_dir():
         summary_path = Path(".akaidoo/context/summary.json")
         try:
-            summary = {"addons": sorted(list(selected_addon_names))}
+            summary = {
+                "addons": sorted(list(selected_addon_names)),
+                "focus_models": sorted(list(focus_models_set)) if focus_models_set else None
+            }
             summary_path.write_text(json.dumps(summary, indent=2))
         except Exception as e:
             echo.warning(f"Failed to update session summary: {e}")
