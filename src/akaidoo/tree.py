@@ -63,10 +63,7 @@ class AkaidooNode:
             
             if node.addon_name in seen:
                 typer.secho(" ⬆", nl=False, dim=True)
-                if node.addon and not is_pruned:
-                    typer.secho(f" [{node.addon.path.resolve()}]", dim=True)
-                else:
-                    typer.echo("")
+                typer.echo("")
                 return
             seen.add(node.addon_name)
             
