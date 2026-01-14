@@ -32,19 +32,40 @@ class AkaidooNode:
     def key(addon_name: str) -> NodeKey:
         return addon_name
 
-    def print_tree(
+    def to_string(
         self,
         odoo_series: OdooSeries,
         fold_core_addons: bool,
         fold_framework_addons: bool = False,
         framework_addons: Iterable[str] = (),
         pruned_addons: Dict[str, str] = None,
-    ) -> None:
+        use_ansi: bool = False,
+    ) -> str:
+        lines = []
         seen: Set[str] = set()
         if pruned_addons is None:
             pruned_addons = {}
 
-        def _print(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
+        def _append(text: str, nl: bool = True, dim: bool = False, fg: str = None):
+            if use_ansi:
+                styled_text = typer.style(text, dim=dim, fg=fg)
+                if nl:
+                    lines.append(styled_text)
+                else:
+                    if lines:
+                        lines[-1] += styled_text
+                    else:
+                        lines.append(styled_text)
+            else:
+                if nl:
+                    lines.append(text)
+                else:
+                    if lines:
+                        lines[-1] += text
+                    else:
+                        lines.append(text)
+
+        def _traverse(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
             # Choose marker for this module node
             if is_root:
                 marker = ""
@@ -56,25 +77,21 @@ class AkaidooNode:
             is_pruned = pruning_reason is not None
             
             # 1. Module Header
-            if is_pruned:
-                typer.secho(f"{indent}{marker}Module: {node.addon_name}", nl=False, dim=True)
-            else:
-                typer.echo(f"{indent}{marker}Module: {node.addon_name}", nl=False)
+            _append(f"{indent}{marker}Module: {node.addon_name}", nl=False, dim=is_pruned)
             
             if node.addon_name in seen:
-                typer.secho(" ⬆", nl=False, dim=True)
-                typer.echo("")
+                _append(" ⬆", nl=True, dim=True)
                 return
             seen.add(node.addon_name)
             
             # Pruning tags
             if is_pruned:
                 if pruning_reason == "framework":
-                    typer.secho(" [pruned (framework)]", nl=False, dim=True)
+                    _append(" [pruned (framework)]", nl=False, dim=True)
                 else:
-                    typer.secho(" [pruned]", nl=False, dim=True)
+                    _append(" [pruned]", nl=False, dim=True)
 
-            typer.echo("")
+            _append("") # New line
             
             # Determine indentation for contents and children of this module
             if is_root:
@@ -89,9 +106,9 @@ class AkaidooNode:
                     path_to_print = path_to_print.relative_to(Path.cwd())
                 except ValueError:
                     pass
-                typer.echo(f"{content_indent}Path: {path_to_print}")
+                _append(f"{content_indent}Path: {path_to_print}")
             elif not node.addon:
-                typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
+                _append(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
             has_files = len(node.files) > 0 and not is_pruned # Hide files if pruned
             
@@ -102,13 +119,11 @@ class AkaidooNode:
             should_fold = (fold_core_addons and is_core) or (fold_framework_addons and is_framework)
             
             # If pruned, we act as if we show children (to show structure), unless folded?
-            # Pruning is a form of folding content, but structure remains.
             has_children = len(node.children) > 0 and not should_fold
             
             # 3. Print Files
             if has_files:
                 for i, f in enumerate(node.files):
-                    # Check if this file is the absolute last item in this branch (module files + module children)
                     is_last_file = (i == len(node.files) - 1) and not has_children
                     file_marker = "└── " if is_last_file else "├── "
                     
@@ -130,24 +145,42 @@ class AkaidooNode:
                         if models:
                             model_hint = f" [Models: {', '.join(sorted(models))}]"
                     
-                    typer.echo(f"{content_indent}{file_marker}{rel_path}{size_str}{model_hint}")
+                    _append(f"{content_indent}{file_marker}{rel_path}{size_str}{model_hint}")
 
             # 4. Print Children (Dependencies)
             if has_children:
-                # Add a vertical connector if there were files before
                 if has_files:
-                    typer.echo(f"{content_indent}│")
+                    _append(f"{content_indent}│")
                 
                 sorted_children = sorted(node.children, key=lambda n: n.addon_name)
                 for i, child in enumerate(sorted_children):
                     is_last_child = (i == len(sorted_children) - 1)
-                    _print(content_indent, child, is_last_child, False)
+                    _traverse(content_indent, child, is_last_child, False)
 
-        _print("", self, True, True)
+        _traverse("", self, True, True)
+        return "\n".join(lines)
+
+    def print_tree(
+        self,
+        odoo_series: OdooSeries,
+        fold_core_addons: bool,
+        fold_framework_addons: bool = False,
+        framework_addons: Iterable[str] = (),
+        pruned_addons: Dict[str, str] = None,
+    ) -> None:
+        tree_str = self.to_string(
+            odoo_series,
+            fold_core_addons,
+            fold_framework_addons=fold_framework_addons,
+            framework_addons=framework_addons,
+            pruned_addons=pruned_addons,
+            use_ansi=True,
+        )
+        typer.echo(tree_str)
 
     def sversion(self, odoo_series: OdooSeries) -> str:
         if not self.addon:
-            return typer.style("✘ not installed", fg=typer.colors.RED)
+            return "✘ not installed"
         elif is_core_ce_addon(self.addon_name, odoo_series):
             return f"{odoo_series.value}+{OdooEdition.CE.value}"
         elif is_core_ee_addon(self.addon_name, odoo_series):
@@ -155,7 +188,7 @@ class AkaidooNode:
         else:
             return self.addon.manifest.version or "no version"
 
-def print_akaidoo_tree(
+def get_akaidoo_tree_string(
     root_addon_names: Iterable[str],
     addons_set: Dict[str, Addon],
     addon_files_map: Dict[str, List[Path]],
@@ -164,7 +197,8 @@ def print_akaidoo_tree(
     fold_framework_addons: bool = False,
     framework_addons: Iterable[str] = (),
     pruned_addons: Dict[str, str] = None,
-):
+    use_ansi: bool = False,
+) -> str:
     nodes: Dict[NodeKey, AkaidooNode] = {}
 
     def get_node(addon_name: str) -> AkaidooNode:
@@ -183,14 +217,40 @@ def print_akaidoo_tree(
                 node.children.append(get_node(depend))
         return node
 
+    tree_strings = []
     for name in sorted(root_addon_names):
         if name == "base":
             continue
         root_node = get_node(name)
-        root_node.print_tree(
+        tree_strings.append(root_node.to_string(
             odoo_series,
             fold_core_addons,
             fold_framework_addons=fold_framework_addons,
             framework_addons=framework_addons,
             pruned_addons=pruned_addons,
-        )
+            use_ansi=use_ansi,
+        ))
+    return "\n".join(tree_strings)
+
+def print_akaidoo_tree(
+    root_addon_names: Iterable[str],
+    addons_set: Dict[str, Addon],
+    addon_files_map: Dict[str, List[Path]],
+    odoo_series: OdooSeries,
+    fold_core_addons: bool,
+    fold_framework_addons: bool = False,
+    framework_addons: Iterable[str] = (),
+    pruned_addons: Dict[str, str] = None,
+):
+    tree_str = get_akaidoo_tree_string(
+        root_addon_names,
+        addons_set,
+        addon_files_map,
+        odoo_series,
+        fold_core_addons,
+        fold_framework_addons=fold_framework_addons,
+        framework_addons=framework_addons,
+        pruned_addons=pruned_addons,
+        use_ansi=True,
+    )
+    typer.echo(tree_str)

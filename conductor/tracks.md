@@ -4,3 +4,4 @@
 - [x] [Smart Pruning](tracks/smart-pruning/plan.md)
 - [ ] [Workflow Enhancements](tracks/workflow-enhancements/plan.md)
 - [x] [Workflow Standardization](tracks/workflow-standardization)
+- [x] [MCP Server Architecture](tracks/mcp-architecture/plan.md)

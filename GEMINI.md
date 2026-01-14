@@ -62,6 +62,9 @@ pytest
 *   **Project Mode & Smart Paths**:
     *   Automatically detects if an input is a single addon, a directory of addons, or a simple path.
     *   Can scan arbitrary directories with intelligent filtering (skipping `i18n`, `__pycache__`).
+*   **MCP Server Support**: Exposes Akaidoo tools via the Model Context Protocol (MCP), allowing AI agents to query Odoo context dynamically.
+    *   Command: `akaidoo serve`
+    *   Tools: `get_odoo_structure`, `read_odoo_context`.
 *   **OpenUpgrade Integration**: Can fetch migration scripts from a separate OpenUpgrade repository.
 
 ### Common Commands
