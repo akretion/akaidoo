@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 import sys
 from pathlib import Path
@@ -195,6 +196,7 @@ def process_and_output_files(
                 )
             raise typer.Exit(1)
     elif output_file_opt:
+        output_file_opt.parent.mkdir(parents=True, exist_ok=True)
         echo.info(
             f"Writing content of {len(sorted_file_paths)} files to {output_file_opt}..."
         )
@@ -422,7 +424,43 @@ def resolve_addons_path(
     return m_addons_path
 
 
+akaidoo_app = typer.Typer(help="Akaidoo: Odoo Context Dumper for AI")
+
+
+@akaidoo_app.command(name="init")
+def init_command():
+    """Initialize Akaidoo state directory."""
+    dot_akaidoo = Path(".akaidoo")
+    if dot_akaidoo.exists():
+        echo.info(".akaidoo/ already exists.")
+    else:
+        dot_akaidoo.mkdir()
+        echo.info("Created .akaidoo/ directory.")
+
+    rules_dir = dot_akaidoo / "rules"
+    rules_dir.mkdir(exist_ok=True)
+
+    guidelines_file = rules_dir / "oca_guidelines.md"
+    if not guidelines_file.exists():
+        guidelines_file.write_text(
+            "# OCA Guidelines\n\n"
+            "- Follow PEP8.\n"
+            "- Use 4 spaces for indentation.\n"
+            "- No tabs.\n"
+            "- Use single quotes for strings unless they contain single quotes.\n"
+            "- Models should have a `_description`.\n"
+            "- Fields should have strings.\n"
+            "- XML files should be indented with 2 spaces.\n"
+            "- Use `odoo.addons.<module_name>` for imports.\n"
+        )
+        echo.info(f"Created {guidelines_file}")
+
+    (dot_akaidoo / "context").mkdir(exist_ok=True)
+
+
+@akaidoo_app.command(name="addon", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def akaidoo_command_entrypoint(
+    ctx: typer.Context,
     addon_name: str = typer.Argument(
         ...,
         help="The name of the target Odoo addon, or a path to a directory.",
@@ -523,7 +561,10 @@ def akaidoo_command_entrypoint(
         False, "--include-views/--no-include-views", help="Include XML view files."
     ),
     include_wizards: bool = typer.Option(
-        False, "--include-wizards/--no-include-wizards", "-w", help="Include XML wizard files."
+        False,
+        "--include-wizards/--no-include-wizards",
+        "-w",
+        help="Include XML wizard files.",
     ),
     include_reports: bool = typer.Option(
         False,
@@ -602,7 +643,6 @@ def akaidoo_command_entrypoint(
         show_default=False,
     ),
     output_file: Optional[Path] = typer.Option(
-        #        Path("akaidoo.out"),
         None,
         "--output-file",
         "-o",
@@ -722,6 +762,21 @@ Conventions:
         force_directory_mode,
         directory_mode_path,
     ) = expand_inputs(addon_name)
+
+    # Update Session Context Summary
+    if Path(".akaidoo/context").is_dir():
+        summary_path = Path(".akaidoo/context/summary.json")
+        try:
+            summary = {"addons": sorted(list(selected_addon_names))}
+            summary_path.write_text(json.dumps(summary, indent=2))
+        except Exception as e:
+            echo.warning(f"Failed to update session summary: {e}")
+
+    # Default output file if in a session and no path given
+    # Note: If output_file is still None but we want it to default if -o was used as flag
+    # But wait, if they didn't use -o at all, it's None.
+    # If they use -o as a flag, we want it to be .akaidoo/context/current.md.
+    # We handled this in the parameter definition with flag_value (to be added).
 
     # --- Mode 1: Directory Mode ---
     if force_directory_mode and directory_mode_path:
@@ -1168,7 +1223,22 @@ def find_pr_commits_after_target(
 
 
 def cli_entry_point():
-    typer.run(akaidoo_command_entrypoint)
+    # Handle -o default value for session context
+    args = sys.argv
+    if "-o" in args:
+        idx = args.index("-o")
+        # Check if -o is followed by a value (not an option and not empty)
+        if idx + 1 == len(args) or args[idx + 1].startswith("-"):
+            args.insert(idx + 1, ".akaidoo/context/current.md")
+    elif "--output-file" in args:
+        idx = args.index("--output-file")
+        if idx + 1 == len(args) or args[idx + 1].startswith("-"):
+            args.insert(idx + 1, ".akaidoo/context/current.md")
+
+    if len(sys.argv) > 1 and sys.argv[1] not in ["init", "addon", "--help", "--version"]:
+        # Prepend 'addon' to sys.argv if not a known subcommand or global option
+        sys.argv.insert(1, "addon")
+    akaidoo_app()
 
 
 if __name__ == "__main__":
