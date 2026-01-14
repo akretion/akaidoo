@@ -162,8 +162,12 @@ def process_and_output_files(
         all_content_for_clipboard = []
         for fp in sorted_file_paths:
             try:
+                try:
+                    header_path = fp.resolve().relative_to(Path.cwd())
+                except ValueError:
+                    header_path = fp.resolve()
                 header = (
-                    f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path for clarity
+                    f"# FILEPATH: {header_path}\n"
                 )
                 content = shrunken_files_content.get(
                     fp.resolve(),
@@ -200,7 +204,11 @@ def process_and_output_files(
                 f.write(introduction + "\n\n")
                 for fp in sorted_file_paths:
                     try:
-                        header = f"# FILEPATH: {fp.resolve()}\n"  # Ensure absolute path
+                        try:
+                            header_path = fp.resolve().relative_to(Path.cwd())
+                        except ValueError:
+                            header_path = fp.resolve()
+                        header = f"# FILEPATH: {header_path}\n"
                         content = shrunken_files_content.get(
                             fp.resolve(),
                             re.sub(

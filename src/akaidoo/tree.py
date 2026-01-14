@@ -84,7 +84,12 @@ class AkaidooNode:
             
             # 2. Path Header
             if node.addon and not is_pruned:
-                typer.echo(f"{content_indent}Path: {node.addon.path.resolve()}")
+                path_to_print = node.addon.path.resolve()
+                try:
+                    path_to_print = path_to_print.relative_to(Path.cwd())
+                except ValueError:
+                    pass
+                typer.echo(f"{content_indent}Path: {path_to_print}")
             elif not node.addon:
                 typer.secho(f"{content_indent}Status: ({node.sversion(odoo_series)})", dim=True)
 
