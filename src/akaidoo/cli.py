@@ -694,6 +694,9 @@ def resolve_akaidoo_context(
         bold=True,
     )
 
+    # Initialize relevant_models as empty set for first pass
+    relevant_models: Set[str] = set()
+
     # Auto-expand harvesting
     if auto_expand:
         # We need to scan the TARGET addons to find which models are significantly extended

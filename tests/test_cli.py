@@ -256,7 +256,7 @@ def test_main_help():
     # The main help might come from test_app's help or the command's docstring.
     # Let's check for options of akaidoo_command_entrypoint:
     # assert "--only-target-addon" in result.stdout
-    assert "-l" in stdout_clean
+    # assert "-l" in stdout_clean  # SKIPPED: -l flag removed, replaced with --prune enum
     if result.stderr_bytes:
         print("STDERR from test_main_help:", result.stderr)
     assert not result.stderr_bytes
