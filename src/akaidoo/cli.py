@@ -811,7 +811,7 @@ def resolve_akaidoo_context(
                 if is_dependency and shrink_mode != "none":
                     try:
                         content = manifest_path.read_text(encoding="utf-8")
-                        shrunken = shrink_manifest(content)
+                        shrunken = shrink_manifest(content, prune_mode=prune_mode)
                         shrunken_files_content[manifest_path.resolve()] = shrunken
                     except Exception as e:
                         echo.warning(

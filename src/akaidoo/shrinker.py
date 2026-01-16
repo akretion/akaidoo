@@ -9,7 +9,7 @@ from tree_sitter_python import language as python_language
 from .utils import _get_odoo_model_name_from_body, parser
 
 
-def shrink_manifest(content: str) -> str:
+def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
     """
     Shrinks a manifest content by keeping only essential keys.
     """
@@ -17,12 +17,21 @@ def shrink_manifest(content: str) -> str:
         manifest = ast.literal_eval(content)
         if not isinstance(manifest, dict):
             return content
-            
-        keep_keys = {"name", "version", "depends", "external_dependencies"}
+
+        keep_keys = {
+            "name",
+            "summary",
+            "depends",
+            "external_dependencies",
+            "pre_init_hook",
+            "post_init_hook",
+            "uninstall_hook",
+        }
+        if prune_mode == "soft":
+            keep_keys.add("data")
+
         new_manifest = {k: v for k, v in manifest.items() if k in keep_keys}
-        
-        # Determine if it's a "leaf" manifest (no depends or empty) to maybe format tighter?
-        # For now, standard pprint is fine, but let's make it look like a manifest.
+
         return pprint.pformat(new_manifest, indent=4, sort_dicts=True)
     except Exception:
         return content
