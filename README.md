@@ -89,18 +89,14 @@ Think of generating an LLM context like taking a photograph. You want your subje
 | **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. **Dependencies are filtered to only include files defining relevant models.** | Focused work on specific business logic chains. |
 | **`hard`** | **Macro** | Includes **only** the Target Addons (Subject). | Unit testing, independent module work. |
 
-### Exclusion Profiles (`--exclude-profile`)
+### Exclusion Logic
 *Removes "well-known" clutter to focus on custom code.*
 
-| Profile | Description |
-| :--- | :--- |
-| **`framework`** | **Default.** Excludes stable framework modules (`base`, `web`, `mail`, `product`, etc.). |
-| **`core`** | Excludes **ALL** standard Odoo core addons. Only custom/local addons remain. |
-| **`none`** | No automatic exclusions. |
+By default, Akaidoo excludes a standard list of stable framework modules (`base`, `web`, `mail`, `product`, etc.) that an LLM is expected to know, saving a significant amount of tokens.
 
-**Fine-Tuning:**
-- Use `--exclude addon_name` to add specific modules to the blacklist.
-- Use `--rm-exclude addon_name` to remove modules from the blacklist (e.g., if you need to debug `mail` logic).
+You can easily modify this behavior for a single run:
+- Use `--exclude addon_name` to add a specific module to the exclusion list.
+- Use `--no-exclude addon_name` to remove a module from the default exclusion list (i.e., to force its inclusion if you need to debug it).
 
 ## Usage Examples
 

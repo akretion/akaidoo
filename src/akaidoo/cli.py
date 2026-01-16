@@ -445,9 +445,8 @@ def resolve_akaidoo_context(
     module_diff_path: Optional[Path] = None,
     migration_commits: bool = False,
     include: Optional[str] = None,
-    exclude_profile: str = "framework",
     exclude_addons_str: Optional[str] = None,
-    rm_exclude_addons_str: Optional[str] = None,
+    no_exclude_addons_str: Optional[str] = None,
     shrink_mode: str = "none",
     expand_models_str: Optional[str] = None,
     auto_expand: bool = True,
@@ -482,14 +481,19 @@ def resolve_akaidoo_context(
         else:
             includes.update(raw_includes)
 
-    # Parse Exclusions (Initial)
-    excluded_addons = set()
-    profiles = {p.strip() for p in exclude_profile.split(",")}
-    if "framework" in profiles:
-        excluded_addons.update(FRAMEWORK_ADDONS)
+    # Build exclusion list
+    # Start with the default framework addons
+    excluded_addons = set(FRAMEWORK_ADDONS)
 
+    # Add user-specified exclusions
     if exclude_addons_str:
         excluded_addons.update({a.strip() for a in exclude_addons_str.split(",")})
+
+    # Remove user-specified inclusions (overrides)
+    if no_exclude_addons_str:
+        excluded_addons.difference_update(
+            {a.strip() for a in no_exclude_addons_str.split(",")}
+        )
 
     if expand_models_str:
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
@@ -668,21 +672,6 @@ def resolve_akaidoo_context(
         detected_odoo_series = detect_from_addons_set(addons_set)
         if len(detected_odoo_series) == 1:
             final_odoo_series = detected_odoo_series.pop()
-
-    # Handle Core Profile Exclusions
-    if "core" in profiles:
-        if final_odoo_series:
-            excluded_addons.update(get_core_addons(final_odoo_series))
-        else:
-            echo.warning(
-                "Could not determine Odoo series, skipping 'core' exclusion profile."
-            )
-
-    # Apply Remove Exclusions (Overrides)
-    if rm_exclude_addons_str:
-        excluded_addons.difference_update(
-            {a.strip() for a in rm_exclude_addons_str.split(",")}
-        )
 
     # Never exclude explicitly selected targets
     excluded_addons.difference_update(selected_addon_names)
@@ -1155,21 +1144,15 @@ def akaidoo_command_entrypoint(
         help="Comma-separated list of content to include: view, wizard, data, report, controller, security, static, test, all. Models are always included.",
         show_default=False,
     ),
-    exclude_profile: str = typer.Option(
-        "framework",
-        "--exclude-profile",
-        help="Exclusion profile: framework (default), core, none.",
-        case_sensitive=False,
-    ),
     exclude_addons_str: Optional[str] = typer.Option(
         None,
         "--exclude",
-        help="Comma-separated list of addons to exclude (add to profile).",
+        help="Comma-separated list of addons to add to the default exclusion list.",
     ),
-    rm_exclude_addons_str: Optional[str] = typer.Option(
+    no_exclude_addons_str: Optional[str] = typer.Option(
         None,
-        "--rm-exclude",
-        help="Comma-separated list of addons to keep (remove from profile).",
+        "--no-exclude",
+        help="Comma-separated list of addons to remove from the exclusion list (i.e., to force include).",
     ),
     separator: str = typer.Option(
         "\n", "--separator", help="Separator character between filenames."
@@ -1258,9 +1241,8 @@ def akaidoo_command_entrypoint(
         module_diff_path=module_diff_path,
         migration_commits=migration_commits,
         include=include,
-        exclude_profile=exclude_profile,
         exclude_addons_str=exclude_addons_str,
-        rm_exclude_addons_str=rm_exclude_addons_str,
+        no_exclude_addons_str=no_exclude_addons_str,
         shrink_mode=shrink_mode,
         expand_models_str=expand_models_str,
         auto_expand=auto_expand,
