@@ -1,10 +1,31 @@
 import sys
 import argparse
+import ast
+import pprint
 from pathlib import Path
 from typing import Optional, Set
 from tree_sitter import Language, Parser
 from tree_sitter_python import language as python_language
 from .utils import _get_odoo_model_name_from_body, parser
+
+
+def shrink_manifest(content: str) -> str:
+    """
+    Shrinks a manifest content by keeping only essential keys.
+    """
+    try:
+        manifest = ast.literal_eval(content)
+        if not isinstance(manifest, dict):
+            return content
+            
+        keep_keys = {"name", "version", "depends", "external_dependencies"}
+        new_manifest = {k: v for k, v in manifest.items() if k in keep_keys}
+        
+        # Determine if it's a "leaf" manifest (no depends or empty) to maybe format tighter?
+        # For now, standard pprint is fine, but let's make it look like a manifest.
+        return pprint.pformat(new_manifest, indent=4, sort_dicts=True)
+    except Exception:
+        return content
 
 
 def shrink_python_file(

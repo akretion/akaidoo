@@ -23,7 +23,7 @@ import manifestoo.echo as manifestoo_echo_module
 from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import ensure_odoo_series, print_list, comma_split
 
-from .shrinker import shrink_python_file
+from .shrinker import shrink_python_file, shrink_manifest
 from .utils import get_file_odoo_models, get_odoo_model_stats, get_model_relations, AUTO_EXPAND_THRESHOLD
 from .scanner import (
     BINARY_EXTS,
@@ -805,6 +805,19 @@ def resolve_akaidoo_context(
             if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
                 manifest_path = addon_dir / "__manifest__.py"
                 found_files_list.append(manifest_path)
+
+                # Shrink manifest for dependencies
+                is_dependency = addon_to_scan_name not in selected_addon_names
+                if is_dependency and shrink_mode != "none":
+                    try:
+                        content = manifest_path.read_text(encoding="utf-8")
+                        shrunken = shrink_manifest(content)
+                        shrunken_files_content[manifest_path.resolve()] = shrunken
+                    except Exception as e:
+                        echo.warning(
+                            f"Failed to shrink manifest for {addon_to_scan_name}: {e}"
+                        )
+
                 if migration_commits and not str(addon_dir).endswith(
                     f"/addons/{addon_to_scan_name}"
                 ):
@@ -1160,7 +1173,7 @@ def akaidoo_command_entrypoint(
         "\n", "--separator", help="Separator character between filenames."
     ),
     shrink_mode: str = typer.Option(
-        "none",
+        "soft",
         "--shrink",
         help="Shrink mode: none (no shrink), soft (deps shrunk with 'pass # shrunk', targets full), medium (relevant: soft in deps/none in targets, irrelevant: hard everywhere), hard (all methods removed).",
         case_sensitive=False,
