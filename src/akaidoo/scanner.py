@@ -76,10 +76,13 @@ def scan_addon_files(
     expand_models_set: Optional[Set[str]] = None,
     shrunken_files_content: Optional[Dict[Path, str]] = None,
     relevant_models: Optional[Set[str]] = None,
+    prune_mode: str = "soft",
 ) -> List[Path]:
     """Scan an Odoo addon directory for relevant files based on filters."""
     found_files = []
-    shrunken_files_content = shrunken_files_content if shrunken_files_content is not None else {}
+    shrunken_files_content = (
+        shrunken_files_content if shrunken_files_content is not None else {}
+    )
     expand_models_set = expand_models_set if expand_models_set is not None else set()
     relevant_models = relevant_models if relevant_models is not None else set()
 
@@ -207,14 +210,35 @@ def scan_addon_files(
 
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
+                    file_in_target_addon = addon_name in selected_addon_names
+                    file_models = set()
+
+                    if (
+                        found_file.suffix == ".py"
+                        and found_file.name != "__manifest__.py"
+                    ):
+                        need_models = (
+                            prune_mode == "medium" and not file_in_target_addon
+                        ) or (shrink_mode != "none")
+                        if need_models:
+                            file_models = get_file_odoo_models(abs_file_path)
+
+                    # File-level Pruning (Medium)
+                    if (
+                        prune_mode == "medium"
+                        and not file_in_target_addon
+                        and found_file.suffix == ".py"
+                        and found_file.name != "__manifest__.py"
+                    ):
+                        if not (file_models & relevant_models):
+                            continue
+
                     if shrink_mode != "none" and found_file.suffix == ".py":
                         # Manifests are handled specially in cli.py
                         if found_file.name != "__manifest__.py":
-                            file_models = get_file_odoo_models(abs_file_path)
                             file_is_relevant = any(
                                 model in relevant_models for model in file_models
                             )
-                            file_in_target_addon = addon_name in selected_addon_names
 
                             should_shrink = False
                             aggressive = False

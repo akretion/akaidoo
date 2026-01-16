@@ -85,7 +85,7 @@ Think of generating an LLM context like taking a photograph. You want your subje
 | :--- | :--- | :--- | :--- |
 | **`none`** | **Wide Angle** | Includes **ALL** dependencies in the tree and dump. | Debugging obscure framework issues. |
 | **`soft`** | **Portrait** | **Default.** Includes Subject + dependencies containing Relevant Models. | Most tasks. Context is sufficient but focused. |
-| **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. | Focused work on specific business logic chains. |
+| **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. **Dependencies are filtered to only include files defining relevant models.** | Focused work on specific business logic chains. |
 | **`hard`** | **Macro** | Includes **only** the Target Addons (Subject). | Unit testing, independent module work. |
 
 ## Usage Examples

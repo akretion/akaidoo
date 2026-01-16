@@ -797,6 +797,8 @@ def resolve_akaidoo_context(
                     f"Enriched parent/child models ({len(enriched_additions)}): {', '.join(sorted(enriched_additions))}"
                 )
 
+    relevant_models = expand_models_set.copy()
+
     processed_addons_count = 0
     for addon_to_scan_name in target_addon_names:
         addon_meta = addons_set.get(addon_to_scan_name)
@@ -859,6 +861,7 @@ def resolve_akaidoo_context(
                 expand_models_set=expand_models_set,
                 shrunken_files_content=shrunken_files_content,
                 relevant_models=relevant_models,
+                prune_mode=prune_mode,
             )
             addon_files_map[addon_to_scan_name] = addon_files
             for f in addon_files:
