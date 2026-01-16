@@ -208,41 +208,42 @@ def scan_addon_files(
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
                     if shrink_mode != "none" and found_file.suffix == ".py":
-                        file_models = get_file_odoo_models(abs_file_path)
-                        file_is_relevant = any(
-                            model in relevant_models
-                            for model in file_models
-                        )
-                        file_in_target_addon = addon_name in selected_addon_names
+                        # Manifests are handled specially in cli.py
+                        if found_file.name != "__manifest__.py":
+                            file_models = get_file_odoo_models(abs_file_path)
+                            file_is_relevant = any(
+                                model in relevant_models for model in file_models
+                            )
+                            file_in_target_addon = addon_name in selected_addon_names
 
-                        should_shrink = False
-                        aggressive = False
-
-                        if shrink_mode == "soft":
-                            should_shrink = not file_in_target_addon
+                            should_shrink = False
                             aggressive = False
 
-                        elif shrink_mode == "medium":
-                            if file_is_relevant and file_in_target_addon:
-                                should_shrink = False
-                            elif file_is_relevant:
-                                should_shrink = True
+                            if shrink_mode == "soft":
+                                should_shrink = not file_in_target_addon
                                 aggressive = False
-                            else:
+
+                            elif shrink_mode == "medium":
+                                if file_is_relevant and file_in_target_addon:
+                                    should_shrink = False
+                                elif file_is_relevant:
+                                    should_shrink = True
+                                    aggressive = False
+                                else:
+                                    should_shrink = True
+                                    aggressive = True
+
+                            elif shrink_mode == "hard":
                                 should_shrink = True
                                 aggressive = True
 
-                        elif shrink_mode == "hard":
-                            should_shrink = True
-                            aggressive = True
-
-                        if should_shrink:
-                            shrunken_content = shrink_python_file(
-                                str(found_file),
-                                aggressive=aggressive,
-                                expand_models=expand_models_set,
-                            )
-                            shrunken_files_content[abs_file_path] = shrunken_content
+                            if should_shrink:
+                                shrunken_content = shrink_python_file(
+                                    str(found_file),
+                                    aggressive=aggressive,
+                                    expand_models=expand_models_set,
+                                )
+                                shrunken_files_content[abs_file_path] = shrunken_content
                     found_files.append(abs_file_path)
 
     return found_files
