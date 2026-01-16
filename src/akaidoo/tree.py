@@ -35,9 +35,7 @@ class AkaidooNode:
     def to_string(
         self,
         odoo_series: OdooSeries,
-        fold_core_addons: bool,
-        fold_framework_addons: bool = False,
-        framework_addons: Iterable[str] = (),
+        excluded_addons: Iterable[str] = (),
         pruned_addons: Dict[str, str] = None,
         use_ansi: bool = False,
     ) -> str:
@@ -46,6 +44,8 @@ class AkaidooNode:
         seen: Set[str] = set()
         if pruned_addons is None:
             pruned_addons = {}
+
+        excluded_set = set(excluded_addons)
 
         def _append(text: str, nl: bool = True, dim: bool = False, fg: str = None):
             if use_ansi:
@@ -67,7 +67,8 @@ class AkaidooNode:
             
             # Check pruning status
             pruning_reason = pruned_addons.get(node.addon_name)
-            is_pruned = pruning_reason is not None
+            is_excluded = node.addon_name in excluded_set
+            is_pruned = pruning_reason is not None or is_excluded
             
             # 1. Module Header
             _append(f"{indent}{marker}Module: {node.addon_name}", nl=False, dim=is_pruned)
@@ -77,8 +78,10 @@ class AkaidooNode:
                 return
             seen.add(node.addon_name)
             
-            # Pruning tags
-            if is_pruned:
+            # Pruning/Exclusion tags
+            if is_excluded:
+                _append(" [pruned (excluded)]", nl=False, dim=True)
+            elif is_pruned:
                 if pruning_reason == "framework":
                     _append(" [pruned (framework)]", nl=False, dim=True)
                 else:
@@ -105,11 +108,7 @@ class AkaidooNode:
 
             has_files = len(node.files) > 0 and not is_pruned # Hide files if pruned
             
-            # Check for folding
-            is_core = is_core_addon(node.addon_name, odoo_series)
-            is_framework = node.addon_name in framework_addons
-            
-            should_fold = (fold_core_addons and is_core) or (fold_framework_addons and is_framework)
+            should_fold = is_excluded
             
             # If pruned, we act as if we show children (to show structure), unless folded?
             has_children = len(node.children) > 0 and not should_fold
@@ -156,16 +155,12 @@ class AkaidooNode:
     def print_tree(
         self,
         odoo_series: OdooSeries,
-        fold_core_addons: bool,
-        fold_framework_addons: bool = False,
-        framework_addons: Iterable[str] = (),
+        excluded_addons: Iterable[str] = (),
         pruned_addons: Dict[str, str] = None,
     ) -> None:
         tree_str = self.to_string(
             odoo_series,
-            fold_core_addons,
-            fold_framework_addons=fold_framework_addons,
-            framework_addons=framework_addons,
+            excluded_addons=excluded_addons,
             pruned_addons=pruned_addons,
             use_ansi=True,
         )
@@ -186,9 +181,7 @@ def get_akaidoo_tree_string(
     addons_set: Dict[str, Addon],
     addon_files_map: Dict[str, List[Path]],
     odoo_series: OdooSeries,
-    fold_core_addons: bool,
-    fold_framework_addons: bool = False,
-    framework_addons: Iterable[str] = (),
+    excluded_addons: Iterable[str] = (),
     pruned_addons: Dict[str, str] = None,
     use_ansi: bool = False,
 ) -> str:
@@ -217,9 +210,7 @@ def get_akaidoo_tree_string(
         root_node = get_node(name)
         tree_strings.append(root_node.to_string(
             odoo_series,
-            fold_core_addons,
-            fold_framework_addons=fold_framework_addons,
-            framework_addons=framework_addons,
+            excluded_addons=excluded_addons,
             pruned_addons=pruned_addons,
             use_ansi=use_ansi,
         ))
@@ -230,9 +221,7 @@ def print_akaidoo_tree(
     addons_set: Dict[str, Addon],
     addon_files_map: Dict[str, List[Path]],
     odoo_series: OdooSeries,
-    fold_core_addons: bool,
-    fold_framework_addons: bool = False,
-    framework_addons: Iterable[str] = (),
+    excluded_addons: Iterable[str] = (),
     pruned_addons: Dict[str, str] = None,
 ):
     tree_str = get_akaidoo_tree_string(
@@ -240,9 +229,7 @@ def print_akaidoo_tree(
         addons_set,
         addon_files_map,
         odoo_series,
-        fold_core_addons,
-        fold_framework_addons=fold_framework_addons,
-        framework_addons=framework_addons,
+        excluded_addons=excluded_addons,
         pruned_addons=pruned_addons,
         use_ansi=True,
     )

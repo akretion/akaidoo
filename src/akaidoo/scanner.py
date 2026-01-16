@@ -66,8 +66,7 @@ def scan_addon_files(
     addon_name: str,
     selected_addon_names: Set[str],
     includes: Set[str],
-    exclude_framework: bool = True,
-    framework_addons: tuple = (),
+    excluded_addons: Set[str],
     shrink_mode: str = "none",
     expand_models_set: Optional[Set[str]] = None,
     shrunken_files_content: Optional[Dict[Path, str]] = None,
@@ -81,6 +80,7 @@ def scan_addon_files(
     )
     expand_models_set = expand_models_set if expand_models_set is not None else set()
     relevant_models = relevant_models if relevant_models is not None else set()
+    excluded_addons = excluded_addons if excluded_addons is not None else set()
 
     scan_roots: List[str] = []
     if "model" in includes:
@@ -150,13 +150,13 @@ def scan_addon_files(
                 
                 relative_path_parts = found_file.relative_to(addon_dir).parts
                 
-                is_framework_file = any(
+                is_excluded_file = any(
                     f"/addons/{name}/" in str(found_file.resolve())
-                    for name in framework_addons
+                    for name in excluded_addons
                 )
-                if is_framework_file and exclude_framework:
+                if is_excluded_file:
                     if manifestoo_echo_module.verbosity >= 3:
-                        echo.info(f"Excluding framework file: {found_file}")
+                        echo.info(f"Excluding file from excluded addon: {found_file}")
                     continue
 
                 # Determine File Type

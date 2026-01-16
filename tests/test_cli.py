@@ -278,7 +278,7 @@ def test_list_files_basic_addons_path(dummy_addons_env):
         "16.0",
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files_basenames = _get_file_names_from_output(result.stdout)
@@ -323,7 +323,7 @@ def test_list_files_odoo_conf(dummy_addons_env):
         "16.0",
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files = _get_file_names_from_output(result.stdout)
@@ -342,7 +342,7 @@ def test_list_files_only_models(dummy_addons_env):
         
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files = _get_file_names_from_output(result.stdout)
@@ -379,7 +379,7 @@ def test_list_files_no_wizards(dummy_addons_env):
         
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files = _get_file_names_from_output(result.stdout)
@@ -400,7 +400,7 @@ def test_list_files_only_target_addon(dummy_addons_env):
         "--prune=hard",
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files = _get_file_names_from_output(result.stdout)
@@ -426,7 +426,7 @@ def test_list_files_exclude_framework(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--exclude-framework",
+        "--exclude-profile=framework",
         "--separator",
         ",",
     ]
@@ -446,7 +446,7 @@ def test_list_files_no_exclude_framework(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
         "--separator",
         ",",
     ]
@@ -472,7 +472,7 @@ def test_list_files_clipboard(dummy_addons_env, mocker):
         "--odoo-series",
         "16.0",
         "--clipboard",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
 
@@ -497,7 +497,7 @@ def test_list_files_output_file(dummy_addons_env, tmp_path):
         "16.0",
         "--output-file",
         str(output_file),
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     _run_cli(args, expected_exit_code=0)
     assert output_file.exists()
@@ -523,7 +523,7 @@ def test_list_files_edit_mode(dummy_addons_env, mocker):
         "--odoo-series",
         "16.0",
         "--edit",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     _run_cli(args, expected_exit_code=0)
     mock_run.assert_called_once()
@@ -552,7 +552,7 @@ def test_list_files_edit_mode_custom_cmd(dummy_addons_env, mocker):
         "--edit",
         "--editor-cmd",
         "customvim -p",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     _run_cli(args, expected_exit_code=0)
     mock_run.assert_called_once()
@@ -616,7 +616,7 @@ def test_trivial_init_skipping(dummy_addons_env):
         "16.0",
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
 
@@ -644,7 +644,7 @@ def test_list_files_shrink_option(dummy_addons_env, mocker):
         "16.0",
         "--shrink=soft",
         "--clipboard",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
 
@@ -683,7 +683,7 @@ def test_list_files_multiple_addons(dummy_addons_env):
         "16.0",
         "--separator",
         ",",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     output_files = _get_file_names_from_output(result.stdout)
@@ -704,7 +704,7 @@ def test_list_files_multiple_addons_shrink(dummy_addons_env, tmp_path):
         "--shrink=soft",
         "--output-file",
         str(output_file),
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     _run_cli(args, expected_exit_code=0)
     content = output_file.read_text()
@@ -777,7 +777,7 @@ def test_list_files_tree_mode(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
     ]
     result = _run_cli(args, expected_exit_code=0)
     # Check for tree symbols and addon names in output
@@ -813,7 +813,7 @@ def project_structure(tmp_path):
     return project_dir
 
 def test_project_mode_container(project_structure):
-    args = ["--prune=none",str(project_structure), "--no-exclude-framework", "-V"]
+    args = ["--prune=none",str(project_structure), "--exclude-profile=none", "-V"]
     result = _run_cli(args)
     # Note: Using result.stdout because test output shows logs there, possibly due to CliRunner capture quirks or configuration
     assert "target(s)" in result.stdout.lower()
@@ -823,14 +823,14 @@ def test_project_mode_container(project_structure):
 
 def test_project_mode_single_path(project_structure):
     addon_path = project_structure / "addon_1"
-    args = ["--prune=none",str(addon_path), "--no-exclude-framework"]
+    args = ["--prune=none",str(addon_path), "--exclude-profile=none"]
     result = _run_cli(args)
     assert "a1.py" in result.stdout
     assert "a2.py" not in result.stdout
 
 def test_project_mode_mixed(project_structure):
     addon_path = project_structure / "addon_1"
-    args = ["--prune=none",f"{addon_path},addon_2", "--no-exclude-framework"]
+    args = ["--prune=none",f"{addon_path},addon_2", "--exclude-profile=none"]
     result = _run_cli(args)
     assert "a1.py" in result.stdout
     assert "a2.py" in result.stdout
@@ -938,7 +938,7 @@ def test_auto_expand_high_score_model(auto_expand_env):
         "--odoo-series", "16.0",
         "--auto-expand",
         "--shrink=soft",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
         "-o", "/tmp/test_auto_expand.txt",
     ]
     result = _run_cli(args)
@@ -954,7 +954,7 @@ def test_auto_expand_implies_shrink(auto_expand_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series", "16.0",
         "--auto-expand",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
         "-o", "/tmp/test_auto_expand2.txt",
     ]
     result = _run_cli(args)
@@ -971,7 +971,7 @@ def test_auto_expand_with_explicit_expand(auto_expand_env):
         "--odoo-series", "16.0",
         "--auto-expand",
         "--expand", "base.model",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
         "-o", "/tmp/test_auto_expand3.txt",
     ]
     result = _run_cli(args)
@@ -1005,7 +1005,7 @@ class VeryLowScoreModel(models.Model):
         "--no-addons-path-from-import-odoo",
         "--odoo-series", "16.0",
         "--auto-expand",
-        "--no-exclude-framework",
+        "--exclude-profile=none",
         "-o", "/tmp/test_auto_expand4.txt",
     ]
     result = _run_cli(args)

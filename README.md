@@ -61,7 +61,8 @@ Think of generating an LLM context like taking a photograph. You want your subje
 | **Focal Point** | **Selected Models** | The specific business objects being modified or analyzed. Akaidoo automatically **Auto-Expands** models that are significantly extended in your Subject, or you can manually Focus (`--focus-models`). |
 | **Depth of Field** | **Related Models** | The "immediate surroundings" of your Focal Point. Parents (`_inherit`) and neighbors (`Many2one`) are kept clearer than unrelated code. |
 | **Resolution** | **Shrinking** (`--shrink`) | Controls the level of detail. Low resolution (shrunken) means seeing class/method signatures but no body code. High resolution means seeing every line. |
-| **Framing/Cropping** | **Pruning** (`--prune`) | Controls what is included in the picture. Do you want a wide-angle shot (all dependencies) or a tight macro shot (Subject only)? |
+| Framing/Cropping | **Pruning** (`--prune`) | Controls what is included in the picture. Do you want a wide-angle shot (all dependencies) or a tight macro shot (Subject only)? |
+| **Cleaning the Lens** | **Exclusion** (`--exclude-profile`) | Removes "clutter" (stable framework/core modules) that the LLM already knows by heart, saving massive amounts of tokens. |
 
 ## 🎛️ Control Specifications
 
@@ -87,6 +88,19 @@ Think of generating an LLM context like taking a photograph. You want your subje
 | **`soft`** | **Portrait** | **Default.** Includes Subject + dependencies containing Relevant Models. | Most tasks. Context is sufficient but focused. |
 | **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. **Dependencies are filtered to only include files defining relevant models.** | Focused work on specific business logic chains. |
 | **`hard`** | **Macro** | Includes **only** the Target Addons (Subject). | Unit testing, independent module work. |
+
+### Exclusion Profiles (`--exclude-profile`)
+*Removes "well-known" clutter to focus on custom code.*
+
+| Profile | Description |
+| :--- | :--- |
+| **`framework`** | **Default.** Excludes stable framework modules (`base`, `web`, `mail`, `product`, etc.). |
+| **`core`** | Excludes **ALL** standard Odoo core addons. Only custom/local addons remain. |
+| **`none`** | No automatic exclusions. |
+
+**Fine-Tuning:**
+- Use `--exclude addon_name` to add specific modules to the blacklist.
+- Use `--rm-exclude addon_name` to remove modules from the blacklist (e.g., if you need to debug `mail` logic).
 
 ## Usage Examples
 
