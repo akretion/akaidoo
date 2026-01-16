@@ -51,39 +51,42 @@ akaidoo sale_stock -c odoo.conf -x
 
 ---
 
-## Key Features
+## 📸 The Photography Analogy: Zoom & Aperture
 
-### 🧠 Smart Pruning (New!)
-Akaidoo understands Odoo code. It analyzes `_inherit`, `Many2one`, etc., to build a graph of "Relevant Models".
-- **Auto-Pruning**: Modules that don't contain any relevant models are automatically "pruned" (files hidden) from both the tree and the dump.
-- **Control**: Enabled by default (`--prune`). Disable with `--no-prune` if you want everything.
+Think of generating an LLM context like taking a photograph. You want your subject (the code you are working on) to be sharp and detailed, while the background (dependencies) provides context without distraction. Akaidoo gives you professional camera controls:
 
-### 📉 Intelligent Shrinking
-Don't waste tokens on implementation details of dependencies.
-- **Standard Shrinking (`-s`)**: Keeps target modules full, but reduces dependencies to class definitions and method signatures.
-- **Aggressive Shrinking (`-S`)**: Shrinks everything (useful for pure data modeling tasks).
-- **Auto-Expansion**: Automatically detects which models are being extended in your target addon and keeps their full hierarchy expanded.
+| Concept | Akaidoo Component | Description |
+| :--- | :--- | :--- |
+| **The Subject** | **Target Addons** | The specific module(s) you are developing or analyzing (e.g., `sale_stock`). |
+| **Focal Point** | **Selected Models** | The specific business objects being modified or analyzed. Akaidoo automatically **Auto-Expands** models that are significantly extended in your Subject, or you can manually Focus (`--focus-models`). |
+| **Depth of Field** | **Related Models** | The "immediate surroundings" of your Focal Point. Parents (`_inherit`) and neighbors (`Many2one`) are kept clearer than unrelated code. |
+| **Resolution** | **Shrinking** (`--shrink`) | Controls the level of detail. Low resolution (shrunken) means seeing class/method signatures but no body code. High resolution means seeing every line. |
+| **Framing/Cropping** | **Pruning** (`--prune`) | Controls what is included in the picture. Do you want a wide-angle shot (all dependencies) or a tight macro shot (Subject only)? |
 
-### 🎯 Granular Filtering
-- **Project Mode**: `akaidoo .` or `akaidoo my_addon` automatically detects addon paths.
-- **Filters**: `--only-models`, `--only-views`, `--exclude-core`, `--exclude-framework`.
-- **Migration Ready**: Use `-u ~/OpenUpgrade` to include relevant migration scripts alongside the code.
+## 🎛️ Control Specifications
 
-## Installation
+### Shrink Modes (`--shrink`)
+*Controls the "Resolution".*
 
-Recommended: Install via [pipx](https://pypi.org/project/pipx/) for isolation.
+| Mode | Target Addons (Subject) | Relevant Models* (Focus+Depth) | Irrelevant Models (Background) | Use Case |
+| :--- | :--- | :--- | :--- | :--- |
+| **`none`** | **Full Code** | **Full Code** | **Full Code** | Deep debugging where every line matters. |
+| **`soft`** | **Full Code** | **Full Code** | *Shrunken* | **Default.** Standard feature development. |
+| **`medium`** | **Full Code** | *Shrunken* | *Hard Shrunk*** | High-level architectural analysis. |
+| **`hard`** | *Shrunken* | *Shrunken* | *Shrunken* | Data modeling, examining API surfaces. |
 
-```console
-pipx install akaidoo
-```
+*(Relevant Models = Auto-expanded/Focused models + their Parents & Relations)*
+**(Hard Shrunk = Method bodies removed entirely, only fields and definitions remain)*
 
-Or via pip:
+### Prune Modes (`--prune`)
+*Controls the "Framing".*
 
-```console
-pip install akaidoo
-```
-
-*Note: Clipboard support (`-x`) requires `pyperclip` (and `xclip`/`xsel` on Linux).*
+| Mode | Scope | Description | Use Case |
+| :--- | :--- | :--- | :--- |
+| **`none`** | **Wide Angle** | Includes **ALL** dependencies in the tree and dump. | Debugging obscure framework issues. |
+| **`soft`** | **Portrait** | **Default.** Includes Subject + dependencies containing Relevant Models. | Most tasks. Context is sufficient but focused. |
+| **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. | Focused work on specific business logic chains. |
+| **`hard`** | **Macro** | Includes **only** the Target Addons (Subject). | Unit testing, independent module work. |
 
 ## Usage Examples
 
@@ -94,27 +97,27 @@ akaidoo sale_timesheet -c odoo.conf
 ```
 
 **2. The "Focused Dump" (Stage 2)**
-Copy context for `sale_timesheet`, shrinking dependencies, but keeping `project.task` fully expanded:
+Standard Context for `sale_timesheet`, shrinking dependencies, but keeping `project.task` fully expanded:
 ```console
 akaidoo sale_timesheet -c odoo.conf --expand project.task -x
 ```
 
-**3. Open in Editor**
-Open all relevant files in your editor (e.g., Neovim/VSCode) for manual review:
+**3. "Macro Shot" (Unit Testing)**
+Get only the code for the `project` module, ignoring all external dependencies:
 ```console
-akaidoo project -c odoo.conf --exclude-core -e
+akaidoo project -c odoo.conf --prune hard -x
 ```
 
-**4. Migration Context**
+**4. "High-Level Architecture"**
+See the data model and API surface of `account` without implementation details:
+```console
+akaidoo account -c odoo.conf --shrink hard -x
+```
+
+**5. Migration Context**
 Gather code + migration scripts for an upgrade:
 ```console
 akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration_context.txt
-```
-
-**5. Directory Mode**
-Scan any folder (not just addons):
-```console
-akaidoo ./scripts/
 ```
 
 ## Contributing
