@@ -255,7 +255,7 @@ def test_main_help():
     assert "[OPTIONS] ADDON_NAME" in stdout_clean  # Key part
     # The main help might come from test_app's help or the command's docstring.
     # Let's check for options of akaidoo_command_entrypoint:
-    # assert "--only-target-addon" in result.stdout
+    # assert "--prune=hard" in result.stdout
     # assert "-l" in stdout_clean  # SKIPPED: -l flag removed, replaced with --prune enum
     if result.stderr_bytes:
         print("STDERR from test_main_help:", result.stderr)
@@ -269,7 +269,7 @@ def test_main_help():
 def test_list_files_basic_addons_path(dummy_addons_env):
     os.environ["VIRTUAL_ENV"] = "FAKE"  # avoid addons_path conflicts
     args = [
-        "--no-prune",
+        "--prune=none",
         "addon_a",
         "--addons-path",
         str(dummy_addons_env["addons_path"]),
@@ -313,9 +313,9 @@ def test_list_files_basic_addons_path(dummy_addons_env):
 
 
 def test_list_files_odoo_conf(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
-        "--no-prune",
+        "--prune=none",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
@@ -332,7 +332,7 @@ def test_list_files_odoo_conf(dummy_addons_env):
 
 
 def test_list_files_only_models(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -368,7 +368,7 @@ def test_list_files_only_models(dummy_addons_env):
 
 
 def test_list_files_no_wizards(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -390,14 +390,14 @@ def test_list_files_no_wizards(dummy_addons_env):
 
 
 def test_list_files_only_target_addon(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--only-target-addon",
+        "--prune=hard",
         "--separator",
         ",",
         "--no-exclude-framework",
@@ -419,7 +419,7 @@ def test_list_files_only_target_addon(dummy_addons_env):
 
 
 def test_list_files_exclude_framework(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -439,7 +439,7 @@ def test_list_files_exclude_framework(dummy_addons_env):
 
 
 def test_list_files_no_exclude_framework(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -464,7 +464,7 @@ def test_list_files_clipboard(dummy_addons_env, mocker):
     if not hasattr(mock_pyperclip_module_patch, "copy"):
         mock_pyperclip_module_patch.copy = mocker.Mock()
 
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_c",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -488,7 +488,7 @@ def test_list_files_clipboard(dummy_addons_env, mocker):
 
 def test_list_files_output_file(dummy_addons_env, tmp_path):
     output_file = tmp_path / "output.txt"
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_c",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -515,7 +515,7 @@ def test_list_files_edit_mode(dummy_addons_env, mocker):
 
     mocker.patch.dict(os.environ, {"VISUAL": "myeditor", "EDITOR": "fallbackeditor"})
 
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_c",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -542,7 +542,7 @@ def test_list_files_edit_mode_custom_cmd(dummy_addons_env, mocker):
     mock_process_result.returncode = 0
     mock_run.return_value = mock_process_result
 
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_c",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -596,7 +596,7 @@ def test_mutually_exclusive_outputs(dummy_addons_env):
 
 
 def test_list_files_missing_addon(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "non_existent_addon",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -607,7 +607,7 @@ def test_list_files_missing_addon(dummy_addons_env):
 
 
 def test_trivial_init_skipping(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -635,14 +635,14 @@ def test_list_files_shrink_option(dummy_addons_env, mocker):
     if not hasattr(mock_pyperclip_module_patch, "copy"):
         mock_pyperclip_module_patch.copy = mocker.Mock()
 
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--shrink",
+        "--shrink=soft",
         "--clipboard",
         "--no-exclude-framework",
     ]
@@ -674,7 +674,7 @@ def test_list_files_shrink_option(dummy_addons_env, mocker):
         assert "requires the 'pyperclip' library" in result.processed_stderr
 
 def test_list_files_multiple_addons(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a,addon_b",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -694,14 +694,14 @@ def test_list_files_multiple_addons(dummy_addons_env):
 
 def test_list_files_multiple_addons_shrink(dummy_addons_env, tmp_path):
     output_file = tmp_path / "out.txt"
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a,addon_b",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--shrink",
+        "--shrink=soft",
         "--output-file",
         str(output_file),
         "--no-exclude-framework",
@@ -722,7 +722,7 @@ def test_directory_mode_basic(tmp_path):
     (d / "subdir").mkdir()
     (d / "subdir" / "file2.txt").write_text("world")
     
-    args = ["--no-prune",str(d)]
+    args = ["--prune=none",str(d)]
     result = _run_cli(args, expected_exit_code=0)
     # Check that file paths are listed in stdout
     assert "file1.py" in result.stdout
@@ -764,13 +764,13 @@ def test_directory_mode_skips_i18n(tmp_path):
     (d / "models").mkdir()
     (d / "models" / "m.py").write_text("...")
     
-    args = ["--no-prune",str(d) + "/"]
+    args = ["--prune=none",str(d) + "/"]
     result = _run_cli(args, expected_exit_code=0)
     assert "fr.po" not in result.stdout
     assert "m.py" in result.stdout
 
 def test_list_files_tree_mode(dummy_addons_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "addon_a",
         "-c",
         str(dummy_addons_env["odoo_conf"]),
@@ -813,7 +813,7 @@ def project_structure(tmp_path):
     return project_dir
 
 def test_project_mode_container(project_structure):
-    args = ["--no-prune",str(project_structure), "--no-exclude-framework", "-V"]
+    args = ["--prune=none",str(project_structure), "--no-exclude-framework", "-V"]
     result = _run_cli(args)
     # Note: Using result.stdout because test output shows logs there, possibly due to CliRunner capture quirks or configuration
     assert "target(s)" in result.stdout.lower()
@@ -823,14 +823,14 @@ def test_project_mode_container(project_structure):
 
 def test_project_mode_single_path(project_structure):
     addon_path = project_structure / "addon_1"
-    args = ["--no-prune",str(addon_path), "--no-exclude-framework"]
+    args = ["--prune=none",str(addon_path), "--no-exclude-framework"]
     result = _run_cli(args)
     assert "a1.py" in result.stdout
     assert "a2.py" not in result.stdout
 
 def test_project_mode_mixed(project_structure):
     addon_path = project_structure / "addon_1"
-    args = ["--no-prune",f"{addon_path},addon_2", "--no-exclude-framework"]
+    args = ["--prune=none",f"{addon_path},addon_2", "--no-exclude-framework"]
     result = _run_cli(args)
     assert "a1.py" in result.stdout
     assert "a2.py" in result.stdout
@@ -931,13 +931,13 @@ class LowScoreModel(models.Model):
 
 
 def test_auto_expand_high_score_model(auto_expand_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "target_addon",
         "-c", str(auto_expand_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
         "--odoo-series", "16.0",
         "--auto-expand",
-        "--shrink",
+        "--shrink=soft",
         "--no-exclude-framework",
         "-o", "/tmp/test_auto_expand.txt",
     ]
@@ -948,7 +948,7 @@ def test_auto_expand_high_score_model(auto_expand_env):
 
 
 def test_auto_expand_implies_shrink(auto_expand_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "target_addon",
         "-c", str(auto_expand_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
@@ -964,7 +964,7 @@ def test_auto_expand_implies_shrink(auto_expand_env):
 
 
 def test_auto_expand_with_explicit_expand(auto_expand_env):
-    args = ["--no-prune",
+    args = ["--prune=none",
         "target_addon",
         "-c", str(auto_expand_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
@@ -999,7 +999,7 @@ class VeryLowScoreModel(models.Model):
 """
     (low_score_addon_path / "models" / "low.py").write_text(low_model_content)
     
-    args = ["--no-prune",
+    args = ["--prune=none",
         "low_score_addon",
         "-c", str(auto_expand_env["odoo_conf"]),
         "--no-addons-path-from-import-odoo",
@@ -1072,7 +1072,7 @@ def test_pruning_logic_integrated(pruning_env):
     # Pass --prune explicitly. Note that if other tests pass --no-prune, 
     # we need to ensure we don't conflict or we override.
     # But here we construct args from scratch.
-    args = ["target_addon", "--addons-path", str(pruning_env), "--prune", "--auto-expand"]
+    args = ["target_addon", "--addons-path", str(pruning_env), "--prune=soft", "--auto-expand"]
     result = _run_cli(args, expected_exit_code=0)
     
     # It might log related models if model.b is not auto-expanded (it has no fields in setup, so score low)
@@ -1096,7 +1096,7 @@ def test_pruning_logic_integrated(pruning_env):
     assert "models/model_x.py" not in result.stdout
 
 def test_no_pruning_logic_integrated(pruning_env):
-    args = ["target_addon", "--addons-path", str(pruning_env), "--no-prune", "--auto-expand"]
+    args = ["target_addon", "--addons-path", str(pruning_env), "--prune=none", "--auto-expand"]
     result = _run_cli(args, expected_exit_code=0)
     
     assert "dep_irrelevant" in result.stdout

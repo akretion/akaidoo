@@ -879,7 +879,7 @@ def resolve_akaidoo_context(
 
     # --- Smart Pruning ---
     pruned_addons: Dict[str, str] = {}
-    if prune_mode != "none" and target_addon_names:
+    if prune_mode not in ("none", "hard") and target_addon_names:
         echo.info("Analyzing models for smart pruning...", bold=True)
 
         all_relations: Dict[str, Set[str]] = {}
