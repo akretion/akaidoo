@@ -102,10 +102,10 @@ Standard Context for `sale_timesheet`, shrinking dependencies, but keeping `proj
 akaidoo sale_timesheet -c odoo.conf --expand project.task -x
 ```
 
-**3. "Macro Shot" (Unit Testing)**
-Get only the code for the `project` module, ignoring all external dependencies:
+**3. Open Models and Views in Editor**
+Open all relevant files (including views) in your editor:
 ```console
-akaidoo project -c odoo.conf --prune hard -x
+akaidoo project -c odoo.conf --include view -e
 ```
 
 **4. "High-Level Architecture"**
@@ -118,6 +118,12 @@ akaidoo account -c odoo.conf --shrink hard -x
 Gather code + migration scripts for an upgrade:
 ```console
 akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration_context.txt
+```
+
+**6. Include Everything**
+Include models, views, wizards, data, tests, etc.:
+```console
+akaidoo my_module -c odoo.conf --include all
 ```
 
 ## Contributing

@@ -59,17 +59,13 @@ def scan_directory_files(directory_path: Path) -> List[Path]:
         found_files.append(item)
     return found_files
 
+MAX_DATA_FILE_SIZE = 50 * 1024
+
 def scan_addon_files(
     addon_dir: Path,
     addon_name: str,
     selected_addon_names: Set[str],
-    include_models: bool = True,
-    include_views: bool = True,
-    include_wizards: bool = True,
-    include_reports: bool = False,
-    include_data: bool = False,
-    only_models: bool = False,
-    only_views: bool = False,
+    includes: Set[str],
     exclude_framework: bool = True,
     framework_addons: tuple = (),
     shrink_mode: str = "none",
@@ -87,32 +83,47 @@ def scan_addon_files(
     relevant_models = relevant_models if relevant_models is not None else set()
 
     scan_roots: List[str] = []
-    if only_models:
+    if "model" in includes:
         scan_roots.append("models")
-        if include_data:
-            scan_roots.append("data")
-    elif only_views:
+        scan_roots.append(".")
+    if "view" in includes:
         scan_roots.append("views")
-    else:
-        if include_models:
-            scan_roots.append("models")
-        if include_views:
-            scan_roots.append("views")
-        if include_wizards:
-            scan_roots.extend(["wizard", "wizards"])
-        if include_reports:
-            scan_roots.extend(["report", "reports"])
-        if include_data:
-            scan_roots.append("data")
-        if not scan_roots or include_models:
-            scan_roots.append(".")
+    if "wizard" in includes:
+        scan_roots.extend(["wizard", "wizards"])
+    if "report" in includes:
+        scan_roots.extend(["report", "reports"])
+    if "data" in includes:
+        scan_roots.append("data")
+    if "controller" in includes:
+        scan_roots.append("controllers")
+    if "security" in includes:
+        scan_roots.append("security")
+    if "static" in includes:
+        scan_roots.append("static")
+    if "test" in includes:
+        scan_roots.append("tests")
 
     current_addon_extensions: List[str] = []
-    if include_models or only_models:
+    if "model" in includes:
         current_addon_extensions.append(".py")
-    if include_views or only_views or include_wizards or include_reports:
+    if "controller" in includes or "test" in includes:
+        if ".py" not in current_addon_extensions:
+            current_addon_extensions.append(".py")
+    
+    if "view" in includes or "wizard" in includes or "report" in includes or "data" in includes:
         if ".xml" not in current_addon_extensions:
             current_addon_extensions.append(".xml")
+    if "data" in includes or "security" in includes:
+        if ".csv" not in current_addon_extensions:
+            current_addon_extensions.append(".csv")
+    if "static" in includes:
+        if ".js" not in current_addon_extensions:
+            current_addon_extensions.append(".js")
+        # Static can also have .xml (qweb) but usually in static/src/xml or similar
+        # We recursively scan roots, so if we add static, we might need more extensions?
+        # For now, let's keep it simple or match standard Odoo static assets.
+        # But 'scan_addon_files' iterates 'ext'.
+        # If I add .js, scan_path_dir.glob("*.js") works.
 
     if not current_addon_extensions:
         return []
@@ -124,25 +135,14 @@ def scan_addon_files(
 
         for ext in current_addon_extensions:
             files_to_check: List[Path] = []
+            # Glob logic based on root_name and ext
             if root_name == ".":
                 if ext == ".py":
                     files_to_check.extend(scan_path_dir.glob("*.py"))
-            elif root_name == "models":
-                if ext == ".py":
-                    files_to_check.extend(scan_path_dir.glob("**/*.py"))
-            elif root_name == "views":
-                if ext == ".xml":
-                    files_to_check.extend(scan_path_dir.glob("**/*.xml"))
-            elif root_name in ("wizard", "wizards"):
-                if ext == ".xml":
-                    files_to_check.extend(scan_path_dir.glob("**/*.xml"))
-            elif root_name in ("report", "reports"):
-                if ext == ".xml":
-                    files_to_check.extend(scan_path_dir.glob("**/*.xml"))
-            elif root_name == "data":
-                if ext in (".csv", ".xml"):
-                    files_to_check.extend(scan_path_dir.glob("**/*.csv"))
-                    files_to_check.extend(scan_path_dir.glob("**/*.xml"))
+            else:
+                # Recursive scan for subdirs
+                # Note: scan_path_dir.glob(f"**/*{ext}")
+                files_to_check.extend(scan_path_dir.glob(f"**/*{ext}"))
 
             for found_file in files_to_check:
                 if not found_file.is_file():
@@ -159,50 +159,52 @@ def scan_addon_files(
                         echo.info(f"Excluding framework file: {found_file}")
                     continue
 
+                # Determine File Type
                 is_model_file = ("models" in relative_path_parts and ext == ".py")
-                is_view_file = ("views" in relative_path_parts and ext == ".xml")
-                is_wizard_file = (
-                    "wizard" in relative_path_parts or "wizards" in relative_path_parts
-                ) and ext == ".xml"
-                is_report_file = (
-                    "report" in relative_path_parts or "reports" in relative_path_parts
-                ) and ext == ".xml"
-                is_data_file = ("data" in relative_path_parts) and ext in (".csv", ".xml")
                 is_root_py_file = (
                     len(relative_path_parts) == 1
                     and relative_path_parts[0].endswith(".py")
                     and root_name == "."
                 )
+                is_view_file = ("views" in relative_path_parts and ext == ".xml")
+                is_wizard_file = (
+                    "wizard" in relative_path_parts or "wizards" in relative_path_parts
+                ) and (ext == ".xml" or ext == ".py") # Wizards have py and xml!
+                is_report_file = (
+                    "report" in relative_path_parts or "reports" in relative_path_parts
+                ) and (ext == ".xml" or ext == ".py") # Reports have py and xml
+                is_data_file = ("data" in relative_path_parts) and ext in (".csv", ".xml")
+                is_controller_file = ("controllers" in relative_path_parts and ext == ".py")
+                is_security_file = ("security" in relative_path_parts) and ext in (".csv", ".xml")
+                is_static_file = ("static" in relative_path_parts)
+                is_test_file = ("tests" in relative_path_parts and ext == ".py")
 
-                if only_models and not (is_model_file or is_data_file):
+                # Filtering
+                should_include = False
+                if "model" in includes and (is_model_file or is_root_py_file):
+                    should_include = True
+                elif "view" in includes and is_view_file:
+                    should_include = True
+                elif "wizard" in includes and is_wizard_file:
+                    should_include = True
+                elif "report" in includes and is_report_file:
+                    should_include = True
+                elif "data" in includes and is_data_file:
+                    should_include = True
+                elif "controller" in includes and is_controller_file:
+                    should_include = True
+                elif "security" in includes and is_security_file:
+                    should_include = True
+                elif "static" in includes and is_static_file:
+                    should_include = True
+                elif "test" in includes and is_test_file:
+                    should_include = True
+                
+                if not should_include:
                     continue
-                if only_views and not is_view_file:
-                    continue
-
-                if not (only_models or only_views):
-                    file_type_matches_include = False
-                    if include_models and (is_model_file or is_root_py_file):
-                        file_type_matches_include = True
-                    if include_views and is_view_file:
-                        file_type_matches_include = True
-                    if include_wizards and is_wizard_file:
-                        file_type_matches_include = True
-                    if include_reports and is_report_file:
-                        file_type_matches_include = True
-                    if include_data and is_data_file:
-                        file_type_matches_include = True
-                    
-                    if root_name == "." and not is_root_py_file and not (
-                        is_model_file or is_view_file or is_wizard_file or is_report_file
-                    ):
-                        if not file_type_matches_include:
-                            continue
-                    elif not file_type_matches_include:
-                        continue
 
                 if (
                     found_file.name == "__init__.py"
-                    and (is_model_file or is_root_py_file)
                     and is_trivial_init_py(found_file)
                 ):
                     echo.debug(f"  Skipping trivial __init__.py: {found_file}")
@@ -210,6 +212,19 @@ def scan_addon_files(
 
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
+                    
+                    # Large Data File Truncation
+                    if is_data_file or (ext == ".csv"): # Security CSVs too?
+                        try:
+                            size = found_file.stat().st_size
+                            if size > MAX_DATA_FILE_SIZE:
+                                content = found_file.read_text(encoding="utf-8")[:MAX_DATA_FILE_SIZE]
+                                content += f"\n\n# ... truncated by akaidoo (size > {MAX_DATA_FILE_SIZE/1024}KB) ..."
+                                shrunken_files_content[abs_file_path] = content
+                        except Exception:
+                            pass
+
+                    # Python Processing (Pruning/Shrinking)
                     file_in_target_addon = addon_name in selected_addon_names
                     file_models = set()
 

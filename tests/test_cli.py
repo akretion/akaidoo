@@ -339,7 +339,7 @@ def test_list_files_only_models(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--only-models",
+        
         "--separator",
         ",",
         "--no-exclude-framework",
@@ -375,8 +375,8 @@ def test_list_files_no_wizards(dummy_addons_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--include-views",
-        "--no-include-wizards",
+        "--include=view",
+        
         "--separator",
         ",",
         "--no-exclude-framework",

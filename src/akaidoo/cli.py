@@ -454,13 +454,7 @@ def resolve_akaidoo_context(
     openupgrade_path: Optional[Path] = None,
     module_diff_path: Optional[Path] = None,
     migration_commits: bool = False,
-    include_models: bool = True,
-    include_views: bool = False,
-    include_wizards: bool = False,
-    include_reports: bool = False,
-    include_data: bool = False,
-    only_models: bool = False,
-    only_views: bool = False,
+    include: Optional[str] = None,
     exclude_core: bool = False,
     exclude_framework: bool = True,
     shrink_mode: str = "none",
@@ -476,6 +470,26 @@ def resolve_akaidoo_context(
     shrunken_files_content: Dict[Path, str] = {}
     diffs = []
     expand_models_set = set()
+
+    # Parse Includes
+    includes: Set[str] = {"model"}
+    if include:
+        raw_includes = {i.strip() for i in include.split(",")}
+        if "all" in raw_includes:
+            includes.update(
+                {
+                    "view",
+                    "wizard",
+                    "data",
+                    "report",
+                    "controller",
+                    "security",
+                    "static",
+                    "test",
+                }
+            )
+        else:
+            includes.update(raw_includes)
 
     if expand_models_str:
         expand_models_set = {m.strip() for m in expand_models_str.split(",")}
@@ -711,20 +725,23 @@ def resolve_akaidoo_context(
                 continue
 
             addon_dir = addon_meta.path.resolve()
-            models_dir = addon_dir / "models"
-            if not models_dir.exists() or not models_dir.is_dir():
-                echo.debug(
-                    f"Auto-expand: No models directory in addon '{addon_name_to_harvest}'"
-                )
-                continue
+            dirs_to_scan = [
+                addon_dir / "models",
+                addon_dir / "wizard",
+                addon_dir / "wizards",
+            ]
 
-            echo.debug(
-                f"Auto-expand: Harvesting from addon '{addon_name_to_harvest}' models at {models_dir}"
-            )
-            # Scan all .py files in models directory
-            for py_file in models_dir.rglob("*.py"):
-                if not py_file.is_file() or "__pycache__" in py_file.parts:
+            for scan_dir in dirs_to_scan:
+                if not scan_dir.exists() or not scan_dir.is_dir():
                     continue
+
+                echo.debug(
+                    f"Auto-expand: Harvesting from addon '{addon_name_to_harvest}' in {scan_dir}"
+                )
+                # Scan all .py files in directory
+                for py_file in scan_dir.rglob("*.py"):
+                    if not py_file.is_file() or "__pycache__" in py_file.parts:
+                        continue
                 try:
                     stats = get_odoo_model_stats(py_file.read_text(encoding="utf-8"))
                     if manifestoo_echo_module.verbosity >= 1:
@@ -848,13 +865,7 @@ def resolve_akaidoo_context(
                 addon_dir=addon_dir,
                 addon_name=addon_to_scan_name,
                 selected_addon_names=selected_addon_names,
-                include_models=include_models,
-                include_views=include_views,
-                include_wizards=include_wizards,
-                include_reports=include_reports,
-                include_data=include_data,
-                only_models=only_models,
-                only_views=only_views,
+                includes=includes,
                 exclude_framework=exclude_framework,
                 framework_addons=FRAMEWORK_ADDONS,
                 shrink_mode=shrink_mode,
@@ -1124,42 +1135,11 @@ def akaidoo_command_entrypoint(
     migration_commits: bool = typer.Option(
         False, "--migration-commits", help="Include deps migration commits"
     ),
-    include_models: bool = typer.Option(
-        True, "--include-models/--no-include-models", help="Include Python model files."
-    ),
-    include_views: bool = typer.Option(
-        False, "--include-views/--no-include-views", help="Include XML view files."
-    ),
-    include_wizards: bool = typer.Option(
-        False,
-        "--include-wizards/--no-include-wizards",
-        "-w",
-        help="Include XML wizard files.",
-    ),
-    include_reports: bool = typer.Option(
-        False,
-        "--include-reports/--no-include-reports",
-        "-r",
-        help="Include XML report files (from report/ or reports/ subdir).",
-    ),
-    include_data: bool = typer.Option(
-        False,
-        "--include-data/--no-include-data",
-        "-d",
-        help="Include data files (from data/ subdir).",
-    ),
-    only_models: bool = typer.Option(
-        False,
-        "--only-models",
-        "-m",
-        help="Only list files under 'models/' directories.",
-        show_default=False,
-    ),
-    only_views: bool = typer.Option(
-        False,
-        "--only-views",
-        "-v",
-        help="Only list files under 'views/' directories.",
+    include: Optional[str] = typer.Option(
+        None,
+        "--include",
+        "-i",
+        help="Comma-separated list of content to include: view, wizard, data, report, controller, security, static, test, all. Models are always included.",
         show_default=False,
     ),
     exclude_core: bool = typer.Option(
@@ -1258,13 +1238,7 @@ def akaidoo_command_entrypoint(
         openupgrade_path=openupgrade_path,
         module_diff_path=module_diff_path,
         migration_commits=migration_commits,
-        include_models=include_models,
-        include_views=include_views,
-        include_wizards=include_wizards,
-        include_reports=include_reports,
-        include_data=include_data,
-        only_models=only_models,
-        only_views=only_views,
+        include=include,
         exclude_core=exclude_core,
         exclude_framework=exclude_framework,
         shrink_mode=shrink_mode,
