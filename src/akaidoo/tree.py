@@ -42,6 +42,7 @@ class AkaidooNode:
         use_ansi: bool = False,
     ) -> str:
         lines = []
+        current_line = []
         seen: Set[str] = set()
         if pruned_addons is None:
             pruned_addons = {}
@@ -49,21 +50,13 @@ class AkaidooNode:
         def _append(text: str, nl: bool = True, dim: bool = False, fg: str = None):
             if use_ansi:
                 styled_text = typer.style(text, dim=dim, fg=fg)
-                if nl:
-                    lines.append(styled_text)
-                else:
-                    if lines:
-                        lines[-1] += styled_text
-                    else:
-                        lines.append(styled_text)
             else:
-                if nl:
-                    lines.append(text)
-                else:
-                    if lines:
-                        lines[-1] += text
-                    else:
-                        lines.append(text)
+                styled_text = text
+
+            current_line.append(styled_text)
+            if nl:
+                lines.append("".join(current_line))
+                current_line.clear()
 
         def _traverse(indent: str, node: AkaidooNode, is_last: bool, is_root: bool) -> None:
             # Choose marker for this module node
