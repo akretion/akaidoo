@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Set
 from tree_sitter import Language, Parser
 from tree_sitter_python import language as python_language
-from .utils import _get_odoo_model_name_from_body, parser
+from .utils import _get_odoo_model_names_from_body, parser
 
 
 def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
@@ -89,11 +89,11 @@ def shrink_python_file(
             if not body_node:
                 continue
 
-            model_name = _get_odoo_model_name_from_body(body_node, code_bytes)
-            should_expand = model_name in expand_models
+            model_names = _get_odoo_model_names_from_body(body_node, code_bytes)
+            should_expand = any(m in expand_models for m in model_names)
 
             if should_expand:
-                actually_expanded_models.add(model_name)
+                actually_expanded_models.update(model_names & expand_models)
                 # Copy the whole class definition including header and body
                 class_full_text = code_bytes[node.start_byte : node.end_byte].decode(
                     "utf-8"

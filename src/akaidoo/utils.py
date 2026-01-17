@@ -9,6 +9,32 @@ parser.language = Language(python_language())
 
 AUTO_EXPAND_THRESHOLD = 7
 
+def _get_odoo_model_names_from_body(body_node, code_bytes: bytes) -> Set[str]:
+    """
+    Scans a class body for an assignment to _name or _inherit and returns a set of model names.
+    """
+    models = set()
+    for child in body_node.children:
+        if child.type == "expression_statement":
+            assign = child.child(0)
+            if assign and assign.type == "assignment":
+                left = assign.child_by_field_name("left")
+                if left and left.type == "identifier":
+                    var_name = code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+                    if var_name in ("_name", "_inherit"):
+                        right = assign.child_by_field_name("right")
+                        if right:
+                            if right.type == "string":
+                                val = code_bytes[right.start_byte : right.end_byte].decode("utf-8")
+                                models.add(val.strip("'\""))
+                            elif right.type == "list":
+                                for element in right.children:
+                                    if element.type == "string":
+                                        val = code_bytes[element.start_byte : element.end_byte].decode("utf-8")
+                                        models.add(val.strip("'\""))
+    return models
+
+
 def get_odoo_model_stats(code: str) -> Dict[str, Dict[str, int]]:
     """
     Scans Python code for Odoo models (_name or _inherit) and returns 
@@ -25,10 +51,8 @@ def get_odoo_model_stats(code: str) -> Dict[str, Dict[str, int]]:
         if node.type == "class_definition":
             body = node.child_by_field_name("body")
             if body:
-                model_name = _get_odoo_model_name_from_body(body, code_bytes)
-                if model_name:
-                    model_info = stats.get(model_name, {'fields': 0, 'methods': 0, 'score': 0})
-                    
+                model_names = _get_odoo_model_names_from_body(body, code_bytes)
+                if model_names:
                     fields_count = 0
                     methods_count = 0
                     
@@ -53,48 +77,18 @@ def get_odoo_model_stats(code: str) -> Dict[str, Dict[str, int]]:
                     # Calculate score: fields=1, methods=3, 10 lines=2
                     score = fields_count * 1 + methods_count * 3 + (lines_count // 10) * 2
                             
-                    model_info['fields'] += fields_count
-                    model_info['methods'] += methods_count
-                    model_info['score'] += score
-                    stats[model_name] = model_info
+                    for model_name in model_names:
+                        model_info = stats.get(model_name, {'fields': 0, 'methods': 0, 'score': 0})
+                        model_info['fields'] += fields_count
+                        model_info['methods'] += methods_count
+                        model_info['score'] += score
+                        stats[model_name] = model_info
                     
         for child in node.children:
             scan_node(child)
             
     scan_node(root_node)
     return stats
-
-def _get_odoo_model_name_from_body(body_node, code_bytes: bytes) -> Optional[str]:
-    """
-    Scans a class body for an assignment to _name or _inherit and returns the string value.
-    """
-    for child in body_node.children:
-        if child.type == "expression_statement":
-            assign = child.child(0)
-            if assign and assign.type == "assignment":
-                left = assign.child_by_field_name("left")
-                if (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_name"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        val = code_bytes[right.start_byte : right.end_byte].decode("utf-8")
-                        return val.strip("'\"")
-                elif (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_inherit"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        val = code_bytes[right.start_byte : right.end_byte].decode("utf-8")
-                        # Handle list of inherits
-                        return val.strip("'\"") 
-    return None
 
 
 def get_model_relations(code: str) -> Dict[str, Set[str]]:
