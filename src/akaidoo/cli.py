@@ -795,7 +795,7 @@ def resolve_akaidoo_context(
                 f"Added {len(add_expand_set)} models to expand set: {', '.join(sorted(add_expand_set))}"
             )
 
-    if PARENT_CHILD_AUTO_EXPAND and expand_models_set and prune_mode == "soft":
+    if PARENT_CHILD_AUTO_EXPAND and expand_models_set:
         enriched_additions = set()
         for m in list(expand_models_set):
             if m.endswith(".line"):
@@ -898,10 +898,10 @@ def resolve_akaidoo_context(
             if f not in found_files_list:
                 found_files_list.append(f)
 
-    # --- Smart Pruning ---
+    # --- Smart Pruning & Relations ---
     pruned_addons: Dict[str, str] = {}
-    if prune_mode not in ("none", "hard") and target_addon_names:
-        echo.info("Analyzing models for smart pruning...", bold=True)
+    if target_addon_names:
+        echo.info("Analyzing models for smart pruning and relations...", bold=True)
 
         all_relations: Dict[str, Set[str]] = {}
         addon_models: Dict[str, Set[str]] = {}
@@ -926,10 +926,10 @@ def resolve_akaidoo_context(
                     except Exception:
                         pass
 
-        # 2. Derive Related Models based on prune_mode
+        # 2. Derive Related Models (Parents/Neighbors)
         related_models_set = set()
-        if prune_mode == "soft":
-            # Soft: Expand + Parent/Child + Related
+        # Soft relations (Expanded + Parent/Child + Related) are useful for both soft/none prune
+        if prune_mode in ("soft", "none"):
             for m in expand_models_set:
                 if m in all_relations:
                     related_models_set.update(all_relations[m])
@@ -950,35 +950,36 @@ def resolve_akaidoo_context(
             )
 
         # 3. Determine Pruned Addons
-        files_to_remove = set()
+        if prune_mode not in ("none", "hard"):
+            files_to_remove = set()
 
-        for addon in target_addon_names:
-            reason = None
-            if addon in excluded_addons:
-                reason = "excluded"
-            else:
-                # Check if addon contains any relevant model (defined or extended)
-                if not (addon_models.get(addon, set()) & relevant_models):
-                    reason = "no_relevant_models"
+            for addon in target_addon_names:
+                reason = None
+                if addon in excluded_addons:
+                    reason = "excluded"
+                else:
+                    # Check if addon contains any relevant model (defined or extended)
+                    if not (addon_models.get(addon, set()) & relevant_models):
+                        reason = "no_relevant_models"
 
-            if reason:
-                pruned_addons[addon] = reason
-                if manifestoo_echo_module.verbosity >= 1:
-                    echo.info(f"Pruning addon '{addon}' ({reason})")
+                if reason:
+                    pruned_addons[addon] = reason
+                    if manifestoo_echo_module.verbosity >= 1:
+                        echo.info(f"Pruning addon '{addon}' ({reason})")
 
-                # Mark files for removal (keep manifest)
-                addon_files = addon_files_map.get(addon, [])
-                for f in addon_files:
-                    if f.name != "__manifest__.py":
-                        files_to_remove.add(f)
+                    # Mark files for removal (keep manifest)
+                    addon_files = addon_files_map.get(addon, [])
+                    for f in addon_files:
+                        if f.name != "__manifest__.py":
+                            files_to_remove.add(f)
 
-        # Apply removal
-        if files_to_remove:
-            original_count = len(found_files_list)
-            found_files_list = [f for f in found_files_list if f not in files_to_remove]
-            echo.info(
-                f"Pruned {len(pruned_addons)} addons, removed {original_count - len(found_files_list)} files."
-            )
+            # Apply removal
+            if files_to_remove:
+                original_count = len(found_files_list)
+                found_files_list = [f for f in found_files_list if f not in files_to_remove]
+                echo.info(
+                    f"Pruned {len(pruned_addons)} addons, removed {original_count - len(found_files_list)} files."
+                )
 
     return AkaidooContext(
         found_files_list=found_files_list,
