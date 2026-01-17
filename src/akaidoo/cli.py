@@ -77,6 +77,7 @@ TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
 class AkaidooContext:
     found_files_list: List[Path]
     shrunken_files_content: Dict[Path, str]
+    shrunken_files_info: Dict[Path, Dict]
     addon_files_map: Dict[str, List[Path]]
     pruned_addons: Dict[str, str]
     addons_set: AddonsSet
@@ -458,6 +459,7 @@ def resolve_akaidoo_context(
     found_files_list: List[Path] = []
     addon_files_map: Dict[str, List[Path]] = {}
     shrunken_files_content: Dict[Path, str] = {}
+    shrunken_files_info: Dict[Path, Dict] = {}
     diffs = []
     expand_models_set = set()
 
@@ -616,6 +618,7 @@ def resolve_akaidoo_context(
         return AkaidooContext(
             found_files_list=found_files_list,
             shrunken_files_content=shrunken_files_content,
+            shrunken_files_info={},
             addon_files_map={},
             pruned_addons={},
             addons_set=AddonsSet(),
@@ -876,6 +879,7 @@ def resolve_akaidoo_context(
                 shrunken_files_content=shrunken_files_content,
                 relevant_models=relevant_models,
                 prune_mode=prune_mode,
+                shrunken_files_info=shrunken_files_info,
             )
             addon_files_map[addon_to_scan_name] = addon_files
             for f in addon_files:
@@ -979,6 +983,7 @@ def resolve_akaidoo_context(
     return AkaidooContext(
         found_files_list=found_files_list,
         shrunken_files_content=shrunken_files_content,
+        shrunken_files_info=shrunken_files_info,
         addon_files_map=addon_files_map,
         pruned_addons=pruned_addons,
         addons_set=addons_set,
@@ -1306,6 +1311,7 @@ Conventions:
             context.final_odoo_series,
             excluded_addons=context.excluded_addons,
             pruned_addons=context.pruned_addons,
+            shrunken_files_info=context.shrunken_files_info,
         )
     else:
         process_and_output_files(

@@ -1117,3 +1117,35 @@ def test_tree_view_token_estimation(dummy_addons_env):
     assert "Estimated context size:" in result.stdout
     assert "KB" in result.stdout
     assert "Tokens)" in result.stdout
+
+
+def test_tree_view_shrunk_visualization(dummy_addons_env):
+    args = [
+        "addon_a",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--shrink=soft",
+        "--prune=none",
+        "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
+    ]
+    result = _run_cli(args, expected_exit_code=0)
+    # addon_b is a dependency, so its files should be shrunk in soft mode
+    # addon_a is target, so it should NOT be shrunk
+    
+    # We need to find the line with b_model.py and check for [shrunk]
+    found_b_shrunk = False
+    found_a_shrunk = False
+    
+    for line in result.stdout.splitlines():
+        if "b_model.py" in line:
+            if "[shrunk]" in line:
+                found_b_shrunk = True
+        if "a_model.py" in line:
+            if "[shrunk]" in line:
+                found_a_shrunk = True
+                
+    assert found_b_shrunk, "Dependency file b_model.py should be marked as [shrunk]"
+    assert not found_a_shrunk, "Target file a_model.py should NOT be marked as [shrunk]"

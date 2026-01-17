@@ -39,10 +39,11 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
 
 def shrink_python_file(
     path: str, aggressive: bool = False, expand_models: Optional[Set[str]] = None
-) -> str:
+) -> tuple[str, Set[str]]:
     """
     Shrinks Python code from a file. If a class matches a model name in
     expand_models, its full content is preserved.
+    Returns (shrunken_content, actually_expanded_models).
     """
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
@@ -51,6 +52,7 @@ def shrink_python_file(
 
     shrunken_parts = []
     expand_models = expand_models or set()
+    actually_expanded_models = set()
 
     def process_function(node, indent=""):
         func_def_node = node
@@ -91,6 +93,7 @@ def shrink_python_file(
             should_expand = model_name in expand_models
 
             if should_expand:
+                actually_expanded_models.add(model_name)
                 # Copy the whole class definition including header and body
                 class_full_text = code_bytes[node.start_byte : node.end_byte].decode(
                     "utf-8"
@@ -136,7 +139,7 @@ def shrink_python_file(
     while shrunken_parts and shrunken_parts[-1] == "":
         shrunken_parts.pop()
 
-    return "\n".join(shrunken_parts) + "\n"
+    return "\n".join(shrunken_parts) + "\n", actually_expanded_models
 
 
 def main():
@@ -154,7 +157,7 @@ def main():
     expand_set = set(args.expand.split(",")) if args.expand else set()
 
     try:
-        shrunken_content = shrink_python_file(
+        shrunken_content, _ = shrink_python_file(
             args.input_file, aggressive=args.shrink_aggressive, expand_models=expand_set
         )
         if args.output:

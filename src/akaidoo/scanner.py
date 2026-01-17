@@ -72,11 +72,15 @@ def scan_addon_files(
     shrunken_files_content: Optional[Dict[Path, str]] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_mode: str = "soft",
+    shrunken_files_info: Optional[Dict[Path, Dict]] = None,
 ) -> List[Path]:
     """Scan an Odoo addon directory for relevant files based on filters."""
     found_files = []
     shrunken_files_content = (
         shrunken_files_content if shrunken_files_content is not None else {}
+    )
+    shrunken_files_info = (
+        shrunken_files_info if shrunken_files_info is not None else {}
     )
     expand_models_set = expand_models_set if expand_models_set is not None else set()
     relevant_models = relevant_models if relevant_models is not None else set()
@@ -277,12 +281,16 @@ def scan_addon_files(
                                 aggressive = True
 
                             if should_shrink:
-                                shrunken_content = shrink_python_file(
+                                shrunken_content, actually_expanded = shrink_python_file(
                                     str(found_file),
                                     aggressive=aggressive,
                                     expand_models=expand_models_set,
                                 )
                                 shrunken_files_content[abs_file_path] = shrunken_content
+                                shrunken_files_info[abs_file_path] = {
+                                    "aggressive": aggressive,
+                                    "expanded_models": actually_expanded
+                                }
                     found_files.append(abs_file_path)
 
     return found_files

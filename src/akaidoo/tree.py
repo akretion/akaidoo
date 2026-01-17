@@ -38,18 +38,21 @@ class AkaidooNode:
         excluded_addons: Iterable[str] = (),
         pruned_addons: Dict[str, str] = None,
         use_ansi: bool = False,
+        shrunken_files_info: Dict[Path, Dict] = None,
     ) -> str:
         lines = []
         current_line = []
         seen: Set[str] = set()
         if pruned_addons is None:
             pruned_addons = {}
+        if shrunken_files_info is None:
+            shrunken_files_info = {}
 
         excluded_set = set(excluded_addons)
 
-        def _append(text: str, nl: bool = True, dim: bool = False, fg: str = None):
+        def _append(text: str, nl: bool = True, dim: bool = False, fg: str = None, bold: bool = False):
             if use_ansi:
-                styled_text = typer.style(text, dim=dim, fg=fg)
+                styled_text = typer.style(text, dim=dim, fg=fg, bold=bold)
             else:
                 styled_text = text
 
@@ -131,13 +134,48 @@ class AkaidooNode:
                     except Exception:
                         pass
                     
-                    model_hint = ""
+                    shrink_info = shrunken_files_info.get(f.resolve())
+                    is_shrunk = shrink_info is not None
+                    
+                    is_aggressive = False
+                    expanded_models = set()
+                    
+                    if is_shrunk:
+                        is_aggressive = shrink_info.get("aggressive", False)
+                        expanded_models = shrink_info.get("expanded_models", set())
+
+                    # If file is aggressively shrunk OR standard shrink with NO expanded models, dim the file line
+                    dim_file = is_shrunk and (is_aggressive or not expanded_models)
+                    
+                    _append(f"{content_indent}{file_marker}{rel_path}{size_str}", nl=False, dim=dim_file)
+
                     if f.suffix == ".py":
                         models = get_file_odoo_models(f)
                         if models:
-                            model_hint = f" [Models: {', '.join(sorted(models))}]"
+                            _append(" [Models: ", nl=False, dim=True)
+                            sorted_models = sorted(models)
+                            for idx, m in enumerate(sorted_models):
+                                sep = ", " if idx < len(sorted_models) - 1 else ""
+                                
+                                # Styling for individual model
+                                if m in expanded_models:
+                                    # Expanded model in a shrunk file -> Highlight
+                                    _append(m, nl=False, fg="cyan", bold=True)
+                                elif is_shrunk:
+                                    # Shrunk model -> Dim
+                                    _append(m, nl=False, dim=True)
+                                else:
+                                    # Normal file -> Normal
+                                    _append(m, nl=False)
+                                    
+                                _append(sep, nl=False, dim=True)
+                            _append("]", nl=False, dim=True)
                     
-                    _append(f"{content_indent}{file_marker}{rel_path}{size_str}{model_hint}")
+                    if is_shrunk:
+                        tag = " [shrunk (hard)]" if is_aggressive else " [shrunk]"
+                        _append(tag, nl=False, dim=True)
+                        
+                    _append("") # End line
 
             # 4. Print Children (Dependencies)
             if has_children:
@@ -157,12 +195,14 @@ class AkaidooNode:
         odoo_series: OdooSeries,
         excluded_addons: Iterable[str] = (),
         pruned_addons: Dict[str, str] = None,
+        shrunken_files_info: Dict[Path, Dict] = None,
     ) -> None:
         tree_str = self.to_string(
             odoo_series,
             excluded_addons=excluded_addons,
             pruned_addons=pruned_addons,
             use_ansi=True,
+            shrunken_files_info=shrunken_files_info,
         )
         typer.echo(tree_str)
 
@@ -184,6 +224,7 @@ def get_akaidoo_tree_string(
     excluded_addons: Iterable[str] = (),
     pruned_addons: Dict[str, str] = None,
     use_ansi: bool = False,
+    shrunken_files_info: Dict[Path, Dict] = None,
 ) -> str:
     nodes: Dict[NodeKey, AkaidooNode] = {}
 
@@ -213,6 +254,7 @@ def get_akaidoo_tree_string(
             excluded_addons=excluded_addons,
             pruned_addons=pruned_addons,
             use_ansi=use_ansi,
+            shrunken_files_info=shrunken_files_info,
         ))
     return "\n".join(tree_strings)
 
@@ -223,6 +265,7 @@ def print_akaidoo_tree(
     odoo_series: OdooSeries,
     excluded_addons: Iterable[str] = (),
     pruned_addons: Dict[str, str] = None,
+    shrunken_files_info: Dict[Path, Dict] = None,
 ):
     tree_str = get_akaidoo_tree_string(
         root_addon_names,
@@ -232,5 +275,6 @@ def print_akaidoo_tree(
         excluded_addons=excluded_addons,
         pruned_addons=pruned_addons,
         use_ansi=True,
+        shrunken_files_info=shrunken_files_info,
     )
     typer.echo(tree_str)
