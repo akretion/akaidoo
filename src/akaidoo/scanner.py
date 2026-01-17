@@ -1,7 +1,5 @@
-import re
 from pathlib import Path
 from typing import List, Set, Optional, Dict
-from manifestoo_core.addons_set import Addon
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from .shrinker import shrink_python_file
@@ -23,6 +21,7 @@ BINARY_EXTS = (
     ".map",
 )
 
+
 def is_trivial_init_py(file_path: Path) -> bool:
     try:
         with file_path.open("r", encoding="utf-8") as f:
@@ -39,6 +38,7 @@ def is_trivial_init_py(file_path: Path) -> bool:
         return True
     except Exception:
         return False
+
 
 def scan_directory_files(directory_path: Path) -> List[Path]:
     """Scan a directory recursively, skipping pycache, i18n, hidden files, and binaries."""
@@ -59,7 +59,9 @@ def scan_directory_files(directory_path: Path) -> List[Path]:
         found_files.append(item)
     return found_files
 
+
 MAX_DATA_FILE_SIZE = 20 * 1024
+
 
 def scan_addon_files(
     addon_dir: Path,
@@ -79,9 +81,7 @@ def scan_addon_files(
     shrunken_files_content = (
         shrunken_files_content if shrunken_files_content is not None else {}
     )
-    shrunken_files_info = (
-        shrunken_files_info if shrunken_files_info is not None else {}
-    )
+    shrunken_files_info = shrunken_files_info if shrunken_files_info is not None else {}
     expand_models_set = expand_models_set if expand_models_set is not None else set()
     relevant_models = relevant_models if relevant_models is not None else set()
     excluded_addons = excluded_addons if excluded_addons is not None else set()
@@ -113,8 +113,13 @@ def scan_addon_files(
     if "controller" in includes or "test" in includes:
         if ".py" not in current_addon_extensions:
             current_addon_extensions.append(".py")
-    
-    if "view" in includes or "wizard" in includes or "report" in includes or "data" in includes:
+
+    if (
+        "view" in includes
+        or "wizard" in includes
+        or "report" in includes
+        or "data" in includes
+    ):
         if ".xml" not in current_addon_extensions:
             current_addon_extensions.append(".xml")
     if "data" in includes or "security" in includes:
@@ -151,9 +156,9 @@ def scan_addon_files(
             for found_file in files_to_check:
                 if not found_file.is_file():
                     continue
-                
+
                 relative_path_parts = found_file.relative_to(addon_dir).parts
-                
+
                 is_excluded_file = any(
                     f"/addons/{name}/" in str(found_file.resolve())
                     for name in excluded_addons
@@ -164,24 +169,32 @@ def scan_addon_files(
                     continue
 
                 # Determine File Type
-                is_model_file = ("models" in relative_path_parts and ext == ".py")
+                is_model_file = "models" in relative_path_parts and ext == ".py"
                 is_root_py_file = (
                     len(relative_path_parts) == 1
                     and relative_path_parts[0].endswith(".py")
                     and root_name == "."
                 )
-                is_view_file = ("views" in relative_path_parts and ext == ".xml")
+                is_view_file = "views" in relative_path_parts and ext == ".xml"
                 is_wizard_file = (
                     "wizard" in relative_path_parts or "wizards" in relative_path_parts
-                ) and (ext == ".xml" or ext == ".py") # Wizards have py and xml!
+                ) and (ext == ".xml" or ext == ".py")  # Wizards have py and xml!
                 is_report_file = (
                     "report" in relative_path_parts or "reports" in relative_path_parts
-                ) and (ext == ".xml" or ext == ".py") # Reports have py and xml
-                is_data_file = ("data" in relative_path_parts) and ext in (".csv", ".xml")
-                is_controller_file = ("controllers" in relative_path_parts and ext == ".py")
-                is_security_file = ("security" in relative_path_parts) and ext in (".csv", ".xml")
-                is_static_file = ("static" in relative_path_parts)
-                is_test_file = ("tests" in relative_path_parts and ext == ".py")
+                ) and (ext == ".xml" or ext == ".py")  # Reports have py and xml
+                is_data_file = ("data" in relative_path_parts) and ext in (
+                    ".csv",
+                    ".xml",
+                )
+                is_controller_file = (
+                    "controllers" in relative_path_parts and ext == ".py"
+                )
+                is_security_file = ("security" in relative_path_parts) and ext in (
+                    ".csv",
+                    ".xml",
+                )
+                is_static_file = "static" in relative_path_parts
+                is_test_file = "tests" in relative_path_parts and ext == ".py"
 
                 # Filtering
                 should_include = False
@@ -203,26 +216,24 @@ def scan_addon_files(
                     should_include = True
                 elif "test" in includes and is_test_file:
                     should_include = True
-                
+
                 if not should_include:
                     continue
 
-                if (
-                    found_file.name == "__init__.py"
-                    and is_trivial_init_py(found_file)
-                ):
+                if found_file.name == "__init__.py" and is_trivial_init_py(found_file):
                     echo.debug(f"  Skipping trivial __init__.py: {found_file}")
                     continue
 
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
-                    
                     # Large Data File Truncation
-                    if is_data_file or (ext == ".csv"): # Security CSVs too?
+                    if is_data_file or (ext == ".csv"):  # Security CSVs too?
                         try:
                             size = found_file.stat().st_size
                             if size > MAX_DATA_FILE_SIZE:
-                                content = found_file.read_text(encoding="utf-8")[:MAX_DATA_FILE_SIZE]
+                                content = found_file.read_text(encoding="utf-8")[
+                                    :MAX_DATA_FILE_SIZE
+                                ]
                                 content += f"\n\n# ... truncated by akaidoo (size > {MAX_DATA_FILE_SIZE/1024}KB) ..."
                                 shrunken_files_content[abs_file_path] = content
                         except Exception:
@@ -283,17 +294,23 @@ def scan_addon_files(
                                 aggressive = True
 
                             if should_shrink:
-                                shrunken_content, actually_expanded = shrink_python_file(
-                                    str(found_file),
-                                    aggressive=aggressive,
-                                    expand_models=expand_models_set,
-                                    skip_imports=(shrink_mode in ("medium", "hard")),
-                                    strip_metadata=(shrink_mode in ("medium", "hard")),
+                                shrunken_content, actually_expanded = (
+                                    shrink_python_file(
+                                        str(found_file),
+                                        aggressive=aggressive,
+                                        expand_models=expand_models_set,
+                                        skip_imports=(
+                                            shrink_mode in ("medium", "hard")
+                                        ),
+                                        strip_metadata=(
+                                            shrink_mode in ("medium", "hard")
+                                        ),
+                                    )
                                 )
                                 shrunken_files_content[abs_file_path] = shrunken_content
                                 shrunken_files_info[abs_file_path] = {
                                     "aggressive": aggressive,
-                                    "expanded_models": actually_expanded
+                                    "expanded_models": actually_expanded,
                                 }
                     found_files.append(abs_file_path)
 

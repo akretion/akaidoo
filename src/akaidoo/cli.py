@@ -12,7 +12,6 @@ from git import Repo, InvalidGitRepositoryError
 
 import typer
 from manifestoo_core.addons_set import AddonsSet
-from manifestoo_core.core_addons import get_core_addons
 from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
 from manifestoo.addon_sorter import AddonSorterTopological
 from manifestoo.addons_path import AddonsPath as ManifestooAddonsPath
@@ -21,12 +20,11 @@ from manifestoo.commands.list_depends import list_depends_command
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from manifestoo.exceptions import CycleErrorExit
-from manifestoo.utils import ensure_odoo_series, print_list, comma_split
+from manifestoo.utils import print_list, comma_split
 
-from .shrinker import shrink_python_file, shrink_manifest
-from .utils import get_file_odoo_models, get_odoo_model_stats, get_model_relations, AUTO_EXPAND_THRESHOLD
+from .shrinker import shrink_manifest
+from .utils import get_odoo_model_stats, get_model_relations, AUTO_EXPAND_THRESHOLD
 from .scanner import (
-    BINARY_EXTS,
     is_trivial_init_py,
     scan_directory_files,
     scan_addon_files,
@@ -122,6 +120,7 @@ class AkaidooContext:
     diffs: List[Dict]
     enriched_additions: Set[str] = field(default_factory=set)
     new_related: Set[str] = field(default_factory=set)
+
 
 def version_callback_for_run(value: bool):
     if value:
@@ -221,9 +220,7 @@ def process_and_output_files(
                     header_path = fp.resolve().relative_to(Path.cwd())
                 except ValueError:
                     header_path = fp.resolve()
-                header = (
-                    f"# FILEPATH: {header_path}\n"
-                )
+                header = f"# FILEPATH: {header_path}\n"
                 content = shrunken_files_content.get(
                     fp.resolve(),
                     re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
@@ -352,7 +349,7 @@ def expand_inputs(
         is_dir = potential_path.is_dir()
         ends_with_sep = path_str.endswith(os.path.sep)
         has_manifest = (potential_path / "__manifest__.py").is_file()
-        
+
         if is_dir and (ends_with_sep or not has_manifest):
             # Special case: It's a directory scan request
             # Unless it's a container of addons and user DID NOT force slash?
@@ -361,14 +358,18 @@ def expand_inputs(
             # Conflict: ./custom_addons (container) vs ./some_dir (just files).
             # Heuristic: If it contains addons (subdirs with manifests), treat as project mode.
             # If forced with slash, treat as directory mode.
-            
+
             if ends_with_sep:
                 return set(), set(), True, potential_path
-            
+
             # Check if container
-            has_sub_addons = any((sub / "__manifest__.py").is_file() for sub in potential_path.iterdir() if sub.is_dir())
+            has_sub_addons = any(
+                (sub / "__manifest__.py").is_file()
+                for sub in potential_path.iterdir()
+                if sub.is_dir()
+            )
             if not has_sub_addons:
-                 return set(), set(), True, potential_path
+                return set(), set(), True, potential_path
 
     # Project/Addon Mode (Mode 2)
     for item in raw_inputs:
@@ -388,7 +389,7 @@ def expand_inputs(
                     if sub.is_dir() and (sub / "__manifest__.py").is_file():
                         selected_addon_names.add(sub.name)
                         found_any = True
-                
+
                 if found_any:
                     implicit_addons_paths.add(path.resolve())
                 else:
@@ -396,12 +397,12 @@ def expand_inputs(
                     # Treat as simple name? Or warn?
                     # If it was part of a comma list, assume user meant it as a name if no path found.
                     # But path.is_dir() is true. So it's just a folder with no addons.
-                    # Ignore or warn. Let's ignore path expansion and treat as name? 
+                    # Ignore or warn. Let's ignore path expansion and treat as name?
                     # No, if it exists as a dir, it shouldn't be treated as an addon name unless it IS one.
                     # Let's assume user made a mistake or it's a weird input.
                     # For now, if we found nothing, maybe just add it as a name fallback?
                     if not found_any:
-                         selected_addon_names.add(item)
+                        selected_addon_names.add(item)
         else:
             # Simple name
             selected_addon_names.add(item)
@@ -784,9 +785,13 @@ def resolve_akaidoo_context(
                     if not py_file.is_file() or "__pycache__" in py_file.parts:
                         continue
                     try:
-                        stats = get_odoo_model_stats(py_file.read_text(encoding="utf-8"))
+                        stats = get_odoo_model_stats(
+                            py_file.read_text(encoding="utf-8")
+                        )
                         if manifestoo_echo_module.verbosity >= 1:
-                            echo.info(f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}")
+                            echo.info(
+                                f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}"
+                            )
                         for model_name, info in stats.items():
                             score = info.get("score", 0)
                             if score >= AUTO_EXPAND_THRESHOLD:
@@ -866,9 +871,16 @@ def resolve_akaidoo_context(
                             all_discovered_models.update(rels.keys())
                             for m, r_dict in rels.items():
                                 if m not in all_relations:
-                                    all_relations[m] = {"parents": set(), "comodels": set()}
-                                all_relations[m]["parents"].update(r_dict.get("parents", set()))
-                                all_relations[m]["comodels"].update(r_dict.get("comodels", set()))
+                                    all_relations[m] = {
+                                        "parents": set(),
+                                        "comodels": set(),
+                                    }
+                                all_relations[m]["parents"].update(
+                                    r_dict.get("parents", set())
+                                )
+                                all_relations[m]["comodels"].update(
+                                    r_dict.get("comodels", set())
+                                )
                     except Exception:
                         continue
 
@@ -939,7 +951,7 @@ def resolve_akaidoo_context(
         addon_meta = addons_set.get(addon_to_scan_name)
         if addon_meta:
             addon_dir = addon_meta.path.resolve()
-            
+
             # Pruning Decision
             reason = None
             if addon_to_scan_name in excluded_addons:
@@ -993,7 +1005,9 @@ def resolve_akaidoo_context(
 
             processed_addons_count += 1
             if manifestoo_echo_module.verbosity >= 3:
-                echo.info(f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}...")
+                echo.info(
+                    f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}..."
+                )
 
             # Files for the Tree (Always scanned, but we use the results differently)
             addon_files = scan_addon_files(
@@ -1337,7 +1351,9 @@ def akaidoo_command_entrypoint(
     # Mutual exclusivity check
     output_modes_count = sum([bool(output_file), bool(clipboard), bool(edit_mode)])
     if output_modes_count > 1:
-        echo.error("Please choose only one primary output action: --output-file, --clipboard, or --edit.")
+        echo.error(
+            "Please choose only one primary output action: --output-file, --clipboard, or --edit."
+        )
         raise typer.Exit(1)
 
     cmd_call = shlex.join(sys.argv)
@@ -1383,7 +1399,7 @@ Conventions:
                 content = f.read_text(encoding="utf-8")
             except Exception:
                 content = ""
-        
+
         file_size = len(content)
         total_chars += file_size
 
@@ -1396,14 +1412,14 @@ Conventions:
                     models_in_file = info["models"].keys()
                 else:
                     models_in_file = get_odoo_model_stats(content).keys()
-                
+
                 if models_in_file:
                     # Simple attribution: full file size to each model mentioned
                     for m in models_in_file:
                         model_chars_map[m] = model_chars_map.get(m, 0) + file_size
             except Exception:
                 pass
-    
+
     total_kb = total_chars / 1024
     total_tokens = int(total_chars * TOKEN_ESTIMATION_FACTOR / 1000)
     threshold_chars = total_chars * 0.05
@@ -1411,12 +1427,10 @@ Conventions:
     def format_model_list(models_set: Set[str]) -> str:
         if not models_set:
             return ""
-        
+
         # Sort by total chars descending, then by name
         sorted_models = sorted(
-            models_set,
-            key=lambda m: (model_chars_map.get(m, 0), m),
-            reverse=True
+            models_set, key=lambda m: (model_chars_map.get(m, 0), m), reverse=True
         )
 
         formatted_items = []
@@ -1429,7 +1443,7 @@ Conventions:
                 formatted_items.append(typer.style(item_str, fg=typer.colors.YELLOW))
             else:
                 formatted_items.append(m)
-        
+
         return ", ".join(formatted_items)
 
     # Detailed Expansion Reporting
@@ -1437,18 +1451,28 @@ Conventions:
     typer.echo()  # Blank line after tree
     original_auto_expanded = context.expand_models_set - context.enriched_additions
     if original_auto_expanded:
-        label = typer.style(f"Auto-expanded {len(original_auto_expanded)} models:", bold=True)
+        label = typer.style(
+            f"Auto-expanded {len(original_auto_expanded)} models:", bold=True
+        )
         typer.echo(f"{label} {format_model_list(original_auto_expanded)}")
-    
+
     if context.enriched_additions:
-        label = typer.style(f"Enriched parent/child models ({len(context.enriched_additions)}):", bold=True)
+        label = typer.style(
+            f"Enriched parent/child models ({len(context.enriched_additions)}):",
+            bold=True,
+        )
         typer.echo(f"{label} {format_model_list(context.enriched_additions)}")
-    
+
     if context.new_related:
-        label = typer.style(f"Other Related models (neighbors/parents) ({len(context.new_related)}):", bold=True)
+        label = typer.style(
+            f"Other Related models (neighbors/parents) ({len(context.new_related)}):",
+            bold=True,
+        )
         typer.echo(f"{label} {format_model_list(context.new_related)}")
 
-    typer.echo(typer.style(f"Found {len(context.found_files_list)} total files.", bold=True))
+    typer.echo(
+        typer.style(f"Found {len(context.found_files_list)} total files.", bold=True)
+    )
     typer.echo(
         typer.style(
             f"Estimated context size: {total_kb:.2f} KB ({total_tokens}k Tokens)",
@@ -1484,7 +1508,13 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         session_path.write_text(session_content, encoding="utf-8")
         typer.echo(typer.style(f"Session map written to {session_path}", bold=True))
 
-    if not output_file and not clipboard and not edit_mode and not show_tree and not session:
+    if (
+        not output_file
+        and not clipboard
+        and not edit_mode
+        and not show_tree
+        and not session
+    ):
         typer.echo("Files list (no output mode selected):")
         for f in context.found_files_list:
             typer.echo(f"- {f}")
@@ -1499,7 +1529,9 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         dump = get_akaidoo_context_dump(context, introduction)
         if output_file:
             output_file.write_text(dump, encoding="utf-8")
-            typer.echo(typer.style(f"Codebase dump written to {output_file}", bold=True))
+            typer.echo(
+                typer.style(f"Codebase dump written to {output_file}", bold=True)
+            )
         if clipboard:
             if pyperclip:
                 pyperclip.copy(dump)
@@ -1642,7 +1674,13 @@ def cli_entry_point():
         if idx + 1 == len(args) or args[idx + 1].startswith("-"):
             args.insert(idx + 1, ".akaidoo/context/current.md")
 
-    if len(sys.argv) > 1 and sys.argv[1] not in ["init", "addon", "serve", "--help", "--version"]:
+    if len(sys.argv) > 1 and sys.argv[1] not in [
+        "init",
+        "addon",
+        "serve",
+        "--help",
+        "--version",
+    ]:
         # Prepend 'addon' to sys.argv if not a known subcommand or global option
         sys.argv.insert(1, "addon")
     akaidoo_app()

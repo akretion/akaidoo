@@ -1,13 +1,12 @@
 from typing import List, Optional
 from pathlib import Path
-import os
 from fastmcp import FastMCP
-from .cli import resolve_akaidoo_context, get_akaidoo_context_dump, FRAMEWORK_ADDONS
+from .cli import resolve_akaidoo_context, get_akaidoo_context_dump
 from .tree import get_akaidoo_tree_string
-import json
 
 # Create an MCP server
 mcp = FastMCP("Akaidoo")
+
 
 @mcp.tool()
 def get_context_map(addon: str) -> str:
@@ -27,6 +26,7 @@ def get_context_map(addon: str) -> str:
         shrunken_files_info=context.shrunken_files_info,
     )
     return tree_str
+
 
 @mcp.tool()
 def read_source_code(
@@ -52,6 +52,7 @@ def read_source_code(
     )
     introduction = f"MCP Dump for {addon}"
     return get_akaidoo_context_dump(context, introduction)
+
 
 @mcp.tool()
 def ping() -> str:

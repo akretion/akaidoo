@@ -5,8 +5,6 @@ import ast
 import pprint
 from pathlib import Path
 from typing import Optional, Set
-from tree_sitter import Language, Parser
-from tree_sitter_python import language as python_language
 from .utils import _get_odoo_model_names_from_body, parser
 
 
@@ -54,6 +52,7 @@ def shrink_python_file(
     shrunken_parts = []
     expand_models = expand_models or set()
     actually_expanded_models = set()
+
 
 def shrink_python_file(
     path: str,
