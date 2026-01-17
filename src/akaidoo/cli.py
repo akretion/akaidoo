@@ -749,32 +749,32 @@ def resolve_akaidoo_context(
                 for py_file in scan_dir.rglob("*.py"):
                     if not py_file.is_file() or "__pycache__" in py_file.parts:
                         continue
-                try:
-                    stats = get_odoo_model_stats(py_file.read_text(encoding="utf-8"))
-                    if manifestoo_echo_module.verbosity >= 1:
-                        echo.info(f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}")
-                    for model_name, info in stats.items():
-                        score = info.get("score", 0)
-                        if score >= AUTO_EXPAND_THRESHOLD:
-                            if model_name not in expand_models_set:
-                                if model_name in BLACKLIST_AUTO_EXPAND:
+                    try:
+                        stats = get_odoo_model_stats(py_file.read_text(encoding="utf-8"))
+                        if manifestoo_echo_module.verbosity >= 1:
+                            echo.info(f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}")
+                        for model_name, info in stats.items():
+                            score = info.get("score", 0)
+                            if score >= AUTO_EXPAND_THRESHOLD:
+                                if model_name not in expand_models_set:
+                                    if model_name in BLACKLIST_AUTO_EXPAND:
+                                        if manifestoo_echo_module.verbosity >= 1:
+                                            echo.info(
+                                                f"Skipping model '{model_name}' - blacklisted from auto-expand"
+                                            )
+                                        continue
                                     if manifestoo_echo_module.verbosity >= 1:
                                         echo.info(
-                                            f"Skipping model '{model_name}' - blacklisted from auto-expand"
+                                            f"Auto-expanding model '{model_name}' (score: {score}, fields: {info['fields']}, methods: {info['methods']})"
                                         )
-                                    continue
+                                    expand_models_set.add(model_name)
+                            else:
                                 if manifestoo_echo_module.verbosity >= 1:
                                     echo.info(
-                                        f"Auto-expanding model '{model_name}' (score: {score}, fields: {info['fields']}, methods: {info['methods']})"
+                                        f"Skipping model '{model_name}' - score {score} below threshold {AUTO_EXPAND_THRESHOLD}"
                                     )
-                                expand_models_set.add(model_name)
-                        else:
-                            if manifestoo_echo_module.verbosity >= 1:
-                                echo.info(
-                                    f"Skipping model '{model_name}' - score {score} below threshold {AUTO_EXPAND_THRESHOLD}"
-                                )
-                except Exception:
-                    continue
+                    except Exception:
+                        continue
         if manifestoo_echo_module.verbosity >= 1:
             if expand_models_set:
                 echo.info(
