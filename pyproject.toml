@@ -30,8 +30,6 @@ dependencies = [
     "tree-sitter",
     "tree-sitter-python",
     "GitPython",
-    "mcp",
-    "fastmcp",
 ]
 
 [project.scripts]
@@ -52,6 +50,10 @@ test = [
     "pytest",
     "pytest-mock",
     "typer[all]",
+]
+mcp = [
+    "mcp",
+    "fastmcp",
 ]
 
 [tool.setuptools.dynamic]

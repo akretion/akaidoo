@@ -1099,7 +1099,24 @@ def serve_command(
     transport: str = typer.Option("stdio", help="Transport mechanism (stdio or sse)"),
 ):
     """Start the Akaidoo MCP server."""
-    from .server import mcp
+    try:
+        from .server import mcp
+    except ImportError:
+        missing_deps = []
+        try:
+            import mcp  # noqa: F401
+        except ImportError:
+            missing_deps.append("mcp")
+        try:
+            import fastmcp  # noqa: F401
+        except ImportError:
+            missing_deps.append("fastmcp")
+
+        echo.error(
+            f"MCP dependencies are not installed: {', '.join(missing_deps)}\n"
+            f"To install MCP support, run: pip install akaidoo[mcp]"
+        )
+        raise typer.Exit(1)
 
     echo.info(f"Starting Akaidoo MCP server using {transport}...")
     mcp.run(transport=transport)
