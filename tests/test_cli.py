@@ -299,12 +299,10 @@ def test_list_files_basic_addons_path(dummy_addons_env):
     output_full_paths = _get_file_names_from_output(result.stdout)
     addon_a_root_init = dummy_addons_env["addon_a_path"] / "__init__.py"
     addon_a_models_init = dummy_addons_env["addon_a_path"] / "models" / "__init__.py"
-    addon_b_root_init = dummy_addons_env["addon_b_path"] / "__init__.py"
-    addon_b_models_init = dummy_addons_env["addon_b_path"] / "models" / "__init__.py"
-    framework_addon_root_init = dummy_addons_env["framework_addon_path"] / "__init__.py"
-    framework_addon_models_init = (
-        dummy_addons_env["framework_addon_path"] / "models" / "__init__.py"
-    )
+    dummy_addons_env["addon_b_path"] / "__init__.py"
+    dummy_addons_env["addon_b_path"] / "models" / "__init__.py"
+    dummy_addons_env["framework_addon_path"] / "__init__.py"
+    (dummy_addons_env["framework_addon_path"] / "models" / "__init__.py")
 
     assert addon_a_root_init.name in output_full_paths
     assert addon_a_models_init.name in output_full_paths
@@ -758,16 +756,18 @@ def test_directory_mode_trailing_slash_force(tmp_path):
     # Case 1: NO trailing slash -> Treated as "Project Mode" (valid addon path)
     result = _run_cli([addon_path_str, "-V"], expected_exit_code=0)
     # Check logs for "Project Mode" activation
-    # Note: Using result.stdout because test output shows logs there
-    assert "treated as Odoo addon name" in result.stdout
-    assert "Implicitly added addons paths" in result.stdout
+    # Note: Log messages may be in stdout or stderr depending on environment
+    combined_output = result.stdout + result.processed_stderr
+    assert "treated as Odoo addon name" in combined_output
+    assert "Implicitly added addons paths" in combined_output
     assert "model.py" in result.stdout
 
     # Case 2: WITH trailing slash -> Forced to Directory Mode
     result_forced = _run_cli([addon_path_str + "/", "-V"], expected_exit_code=0)
     # Check logs for Directory Mode activation
-    # Note: Using result.stdout because test output shows logs there
-    assert "is a directory. Listing all files recursively" in result_forced.stdout
+    # Note: Log messages may be in stdout or stderr depending on environment
+    combined_output_forced = result_forced.stdout + result_forced.processed_stderr
+    assert "is a directory. Listing all files recursively" in combined_output_forced
     assert "model.py" in result_forced.stdout
 
 
@@ -842,8 +842,9 @@ def test_project_mode_container(project_structure):
         "-V",
     ]
     result = _run_cli(args)
-    # Note: Using result.stdout because test output shows logs there, possibly due to CliRunner capture quirks or configuration
-    assert "target(s)" in result.stdout.lower()
+    # Note: Log messages may be in stdout or stderr depending on environment
+    combined_output = result.stdout + result.processed_stderr
+    assert "target(s)" in combined_output.lower()
     assert "a1.py" in result.stdout
     assert "a2.py" in result.stdout
     assert "some_file.txt" not in result.stdout
