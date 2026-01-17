@@ -1,3 +1,4 @@
+import re
 import sys
 import argparse
 import ast
@@ -54,6 +55,39 @@ def shrink_python_file(
     expand_models = expand_models or set()
     actually_expanded_models = set()
 
+def shrink_python_file(
+    path: str,
+    aggressive: bool = False,
+    expand_models: Optional[Set[str]] = None,
+    skip_imports: bool = False,
+    strip_metadata: bool = False,
+) -> tuple[str, Set[str]]:
+    """
+    Shrinks Python code from a file. If a class matches a model name in
+    expand_models, its full content is preserved.
+    Returns (shrunken_content, actually_expanded_models).
+    """
+    code = Path(path).read_text(encoding="utf-8")
+    code_bytes = bytes(code, "utf8")
+    tree = parser.parse(code_bytes)
+    root_node = tree.root_node
+
+    shrunken_parts = []
+    expand_models = expand_models or set()
+    actually_expanded_models = set()
+
+    def clean_line(line: str) -> str:
+        if not strip_metadata:
+            return line
+        # Remove help="..." or help='...' (handles basic cases)
+        line = re.sub(r",?\s*help\s*=\s*(?P<q>['\"])(?:(?!\1).)*\1", "", line)
+        # Fix possible double commas or trailing commas before closing paren
+        line = line.replace(", ,", ",").replace(",, ", ", ")
+        line = re.sub(r",\s*\)", ")", line)
+        # Remove end-of-line comment
+        line = re.sub(r"#.*$", "", line)
+        return line.strip()
+
     def process_function(node, indent=""):
         func_def_node = node
         if node.type == "decorated_definition":
@@ -67,6 +101,10 @@ def shrink_python_file(
         if not body_node:
             return
 
+        # If aggressive, we completely skip the function body AND header
+        if aggressive:
+            return
+
         start_byte = node.start_byte
         end_byte = body_node.start_byte
 
@@ -77,11 +115,16 @@ def shrink_python_file(
             stripped_line = line.strip()
             if stripped_line:
                 shrunken_parts.append(f"{indent}{stripped_line}")
-        if not aggressive:
-            shrunken_parts.append(f"{indent}    pass  # shrunk")
+
+        shrunken_parts.append(f"{indent}    pass  # shrunk")
 
     for node in root_node.children:
         if node.type in ("import_statement", "import_from_statement"):
+            if not skip_imports:
+                line_text = (
+                    code_bytes[node.start_byte : node.end_byte].decode("utf8").strip()
+                )
+                shrunken_parts.append(line_text)
             continue
 
         if node.type == "class_definition":
@@ -113,28 +156,22 @@ def shrink_python_file(
                         if expr and expr.type == "assignment":
                             line_bytes = code_bytes[child.start_byte : child.end_byte]
                             line_text = line_bytes.decode("utf8").strip()
-                            shrunken_parts.append(f"    {line_text}")
-                    elif (
-                        child.type in ("function_definition", "decorated_definition")
-                        and not aggressive
-                    ):
-                        shrunken_parts.append("")
+                            shrunken_parts.append(f"    {clean_line(line_text)}")
+                    elif child.type in ("function_definition", "decorated_definition"):
                         process_function(child, indent="    ")
             shrunken_parts.append("")
 
-        elif (
-            node.type in ("function_definition", "decorated_definition")
-            and not aggressive
-        ):
+        elif node.type in ("function_definition", "decorated_definition"):
             process_function(node, indent="")
-            shrunken_parts.append("")
+            if not aggressive:
+                shrunken_parts.append("")
 
         elif node.type == "expression_statement":
             expr = node.child(0)
             if expr and expr.type == "assignment":
                 line_bytes = code_bytes[node.start_byte : node.end_byte]
                 line_text = line_bytes.decode("utf8").strip()
-                shrunken_parts.append(line_text)
+                shrunken_parts.append(clean_line(line_text))
 
     while shrunken_parts and shrunken_parts[-1] == "":
         shrunken_parts.pop()

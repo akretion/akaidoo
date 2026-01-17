@@ -59,7 +59,7 @@ def scan_directory_files(directory_path: Path) -> List[Path]:
         found_files.append(item)
     return found_files
 
-MAX_DATA_FILE_SIZE = 50 * 1024
+MAX_DATA_FILE_SIZE = 20 * 1024
 
 def scan_addon_files(
     addon_dir: Path,
@@ -267,12 +267,14 @@ def scan_addon_files(
                                 aggressive = False
 
                             elif shrink_mode == "medium":
-                                if file_is_relevant and file_in_target_addon:
+                                if file_in_target_addon:
                                     should_shrink = False
                                 elif file_is_relevant:
+                                    # Relevant dependency: soft shrink
                                     should_shrink = True
                                     aggressive = False
                                 else:
+                                    # Irrelevant dependency: aggressive shrink
                                     should_shrink = True
                                     aggressive = True
 
@@ -285,6 +287,8 @@ def scan_addon_files(
                                     str(found_file),
                                     aggressive=aggressive,
                                     expand_models=expand_models_set,
+                                    skip_imports=(shrink_mode in ("medium", "hard")),
+                                    strip_metadata=(shrink_mode in ("medium", "hard")),
                                 )
                                 shrunken_files_content[abs_file_path] = shrunken_content
                                 shrunken_files_info[abs_file_path] = {

@@ -91,16 +91,16 @@ def get_odoo_model_stats(code: str) -> Dict[str, Dict[str, int]]:
     return stats
 
 
-def get_model_relations(code: str) -> Dict[str, Set[str]]:
+def get_model_relations(code: str) -> Dict[str, Dict[str, Set[str]]]:
     """
     Scans Python code and returns a dictionary mapping model names defined/extended in the code
-    to a set of related model names (parents from _inherit/_inherits and comodels from relational fields).
+    to their relations: {'parents': set(), 'comodels': set()}.
     """
     code_bytes = bytes(code, "utf8")
     tree = parser.parse(code_bytes)
     root_node = tree.root_node
 
-    relations: Dict[str, Set[str]] = {}
+    relations: Dict[str, Dict[str, Set[str]]] = {}
 
     def scan_node(node):
         if node.type == "class_definition":
@@ -156,8 +156,9 @@ def get_model_relations(code: str) -> Dict[str, Set[str]]:
                 # Initialize relations for these models
                 for m in target_models:
                     if m not in relations:
-                        relations[m] = set()
-                    relations[m].update(parents)
+                        relations[m] = {"parents": set(), "comodels": set()}
+                    # A model should not be its own parent in this context
+                    relations[m]["parents"].update(p for p in parents if p != m)
 
                 # 2. Scan for fields to find comodels
                 for child in body.children:
@@ -185,7 +186,7 @@ def get_model_relations(code: str) -> Dict[str, Set[str]]:
                                                         val = code_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
                                                         comodel = val.strip("'\"")
                                                         for m in target_models:
-                                                            relations[m].add(comodel)
+                                                            relations[m]["comodels"].add(comodel)
                                                         break
                                                     elif arg.type in ("identifier", "attribute", "call", "integer", "float"):
                                                         # First arg might not be a string (e.g. variable or number), skip

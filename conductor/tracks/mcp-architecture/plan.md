@@ -30,6 +30,11 @@ Transition akaidoo from a pure CLI tool to a persistent Model Context Protocol (
     - [x] Create a persistent resource that summarizes the current project (Odoo version, root addons, active configuration).
     - [x] Allow the Agent to subscribe to this to know "where it is".
 
+- [ ] **Maintenance: Synchronize with CLI API**
+    - [ ] Update `resolve_akaidoo_context` calls in `server.py` to match new signature (two-pass, new args).
+    - [ ] Update `tree.py` usage (imports, `print_akaidoo_tree` vs string return).
+    - [ ] Implement `read_odoo_context` strategies (Sniper vs Shotgun) by exposing `focus_models`, `shrink_mode` correctly.
+
 ## Reference
 - Existing `cli.py` logic for dependency traversal.
 - `print_akaidoo_tree` in `tree.py` needs to return string instead of printing.

@@ -20,83 +20,83 @@
 
 It is designed around a powerful **2-Stage Workflow**: first **Map** the context, then **Dump** it.
 
-## The 2-Stage Workflow
+## How Akaidoo Thinks: The Core Algorithm
 
-### Stage 1: The Context Map (Survey) 🗺️
+Akaidoo uses a multi-pass system to make intelligent decisions about what code to include and how to format it. Understanding this process is key to mastering its powerful features.
 
-Before you dump thousands of lines of code into an LLM, use Akaidoo to visualize the scope. Running Akaidoo without output flags (`-x` or `-o`) generates a hierarchical dependency tree.
+### Pass 1: Discovery (Build the Knowledge Graph)
 
-```console
-akaidoo sale_stock -c odoo.conf
-```
+Before any action is taken, Akaidoo performs a comprehensive survey of the entire codebase (target addons + all dependencies).
 
-**What you get:**
-- A visual **Dependency Tree** showing module relationships.
-- **Smart Hints**: Shows which Odoo models (`sale.order`, `account.move`) are defined in each file.
-- **Smart Pruning**: Automatically greys out modules that don't contain relevant models (based on relations), keeping the focus sharp.
-- **File Sizes**: Helps you estimate token usage before dumping.
+1.  **Scan All Python Files**: It quickly parses every `.py` file in the addons path.
+2.  **Map All Relations**: It builds a complete in-memory graph (`all_relations`) that maps every Odoo model to its parents (`_inherit`, `_inherits`) and its comodels (from `Many2one`, `One2many`, `Many2many` fields).
 
-### Stage 2: The Context Dump (Act) 📥
+This initial pass solves the "chicken-and-egg" problem: to know which dependencies are relevant, you first need a complete map of all relationships.
 
-Once you're satisfied with your selection, dump the actual content. Akaidoo formats it perfectly for LLMs (with file path headers) and applies intelligent shrinking to save tokens.
+### Pass 2: Expansion (Define What's "Relevant")
 
-```console
-akaidoo sale_stock -c odoo.conf -x
-```
+Once the graph is built, Akaidoo determines the set of `relevant_models` that will guide the rest of the process.
 
-**What you get:**
-- **Clipboard Content** (or file with `-o`) ready to paste into Gemini/Claude/ChatGPT.
-- **Token Optimization**: Method bodies in dependencies are "shrunk" (replaced with `pass # shrunk`) to save space while preserving API structure.
-- **Auto-Expansion**: Models you are working on (or their relations) are automatically kept in full detail.
+1.  **Initial Seed**: The process starts with a seed set of models from:
+    *   `--auto-expand`: Models in target addons with a high "complexity score" (based on number of fields, methods, and lines of code).
+    *   `--focus-models` or `--expand`: Models you explicitly specify.
+2.  **Recursive Parent Expansion**: Akaidoo walks up the inheritance tree. If a model is in the set, and it `_inherit`s another model (e.g., `portal.mixin`), then that parent model is also added to the set of models to be expanded. This continues recursively until all ancestors are included (unless they are in a blacklist).
+3.  **Child Enrichment**: It also looks for `*.line` models (e.g., `sale.order.line`) and adds their parents to the expansion set, ensuring master-detail relationships are complete.
+4.  **Neighbor Resolution**: Finally, it finds all **comodels** related to the now-expanded set. These neighbors are considered "related" but are not themselves fully expanded, providing a layer of context without pulling in unrelated modules.
+
+### Pass 3: Action (Prune, Shrink, and Dump)
+
+With a clear definition of `relevant_models`, Akaidoo takes action:
+
+1.  **Pruning**: It iterates through each addon in the dependency tree and decides whether to keep or discard it based on the `--prune` mode. In `soft` mode (the default), any addon that contains a file defining a `relevant_model` is kept.
+2.  **Shrinking**: For each file in the final, pruned list, it applies the `--shrink` logic:
+    *   **Target addons are NEVER shrunk** (unless in `hard` mode). Your primary code is always preserved.
+    *   In dependencies, the shrinking is granular:
+        *   Files with relevant models are shrunk `soft` (method bodies become `pass # shrunk`).
+        *   Files with irrelevant models are shrunk `hard` (methods are removed entirely, along with comments and `help=` tags).
+3.  **Dumping**: The final, processed content is assembled with file path headers and delivered to your clipboard, a file, or the editor.
+
+### Final Output: The Summary
+
+After the tree or dump, Akaidoo provides a summary to help you understand the context you've built:
+- **Model Lists**: `Auto-expanded`, `Enriched`, and `Other Related` models are listed, sorted by their estimated token size.
+- **Token Highlighting**: Any model contributing more than 5% of the total token count is highlighted in yellow, making it easy to spot and potentially exclude with `--rm-expand`.
+- **Context Size**: A final estimate of the total size in KB and tokens.
 
 ---
-
-## 📸 The Photography Analogy: Zoom & Aperture
-
-Think of generating an LLM context like taking a photograph. You want your subject (the code you are working on) to be sharp and detailed, while the background (dependencies) provides context without distraction. Akaidoo gives you professional camera controls:
-
-| Concept | Akaidoo Component | Description |
-| :--- | :--- | :--- |
-| **The Subject** | **Target Addons** | The specific module(s) you are developing or analyzing (e.g., `sale_stock`). |
-| **Focal Point** | **Selected Models** | The specific business objects being modified or analyzed. Akaidoo automatically **Auto-Expands** models that are significantly extended in your Subject, or you can manually Focus (`--focus-models`). |
-| **Depth of Field** | **Related Models** | The "immediate surroundings" of your Focal Point. Parents (`_inherit`) and neighbors (`Many2one`) are kept clearer than unrelated code. |
-| **Resolution** | **Shrinking** (`--shrink`) | Controls the level of detail. Low resolution (shrunken) means seeing class/method signatures but no body code. High resolution means seeing every line. |
-| Framing/Cropping | **Pruning** (`--prune`) | Controls what is included in the picture. Do you want a wide-angle shot (all dependencies) or a tight macro shot (Subject only)? |
-| **Cleaning the Lens** | **Exclusion** (`--exclude-profile`) | Removes "clutter" (stable framework/core modules) that the LLM already knows by heart, saving massive amounts of tokens. |
 
 ## 🎛️ Control Specifications
 
 ### Shrink Modes (`--shrink`)
-*Controls the "Resolution".*
+*Controls the "Resolution" or level of detail.*
 
-| Mode | Target Addons (Subject) | Relevant Models* (Focus+Depth) | Irrelevant Models (Background) | Use Case |
+| Mode | Target Addons | Relevant Dependency Models | Irrelevant Dependency Models | Imports & Metadata |
 | :--- | :--- | :--- | :--- | :--- |
-| **`none`** | **Full Code** | **Full Code** | **Full Code** | Deep debugging where every line matters. |
-| **`soft`** | **Full Code** | **Full Code** | *Shrunken* | **Default.** Standard feature development. |
-| **`medium`** | **Full Code** | *Shrunken* | *Hard Shrunk*** | High-level architectural analysis. |
-| **`hard`** | *Shrunken* | *Shrunken* | *Shrunken* | Data modeling, examining API surfaces. |
+| **`none`** | **Full Code** | **Full Code** | **Full Code** | Kept |
+| **`soft`** | **Full Code** | *Shrunken* (keeps method headers) | *Shrunken* | Kept |
+| **`medium`** | **Full Code** | *Shrunken* | **Hard Shrunk** | **Removed** |
+| **`hard`** | *Hard Shrunk* | **Hard Shrunk** | **Hard Shrunk** | **Removed** |
 
-*(Relevant Models = Auto-expanded/Focused models + their Parents & Relations)*
-**(Hard Shrunk = Method bodies removed entirely, only fields and definitions remain)*
+- **Shrunken**: Method bodies are replaced with `pass  # shrunk`.
+- **Hard Shrunk**: Method definitions are removed entirely. Comments and field `help` attributes are also stripped.
 
 ### Prune Modes (`--prune`)
-*Controls the "Framing".*
+*Controls the "Framing" or scope of included addons.*
 
 | Mode | Scope | Description | Use Case |
 | :--- | :--- | :--- | :--- |
-| **`none`** | **Wide Angle** | Includes **ALL** dependencies in the tree and dump. | Debugging obscure framework issues. |
-| **`soft`** | **Portrait** | **Default.** Includes Subject + dependencies containing Relevant Models. | Most tasks. Context is sufficient but focused. |
-| **`medium`** | **Close-up** | Includes Subject + dependencies containing **only** Auto-Expanded models. **Dependencies are filtered to only include files defining relevant models.** | Focused work on specific business logic chains. |
-| **`hard`** | **Macro** | Includes **only** the Target Addons (Subject). | Unit testing, independent module work. |
+| **`none`** | **Wide Angle** | Includes **ALL** dependencies. | Debugging obscure framework issues. |
+| **`soft`** | **Portrait** | **Default.** Includes target addons + dependencies containing any `relevant_model`. | Most development tasks. |
+| **`medium`**| **Close-up** | Includes target addons + dependencies containing only models from the initial auto-expand/focus set. | Focused work on specific business logic. |
+| **`hard`** | **Macro** | Includes **only** the Target Addons. | Unit testing, independent module work. |
 
 ### Exclusion Logic
-*Removes "well-known" clutter to focus on custom code.*
+*Removes "well-known" clutter to focus on your custom code.*
 
-By default, Akaidoo excludes a standard list of stable framework modules (`base`, `web`, `mail`, `product`, etc.) that an LLM is expected to know, saving a significant amount of tokens.
+Akaidoo excludes a default list of stable framework modules (`base`, `web`, `mail`, etc.) that an LLM should already know well. This is a major token-saving feature.
 
-You can easily modify this behavior for a single run:
-- Use `--exclude addon_name` to add a specific module to the exclusion list.
-- Use `--no-exclude addon_name` to remove a module from the default exclusion list (i.e., to force its inclusion if you need to debug it).
+- Use `--exclude addon_name` to add to the exclusion list.
+- Use `--no-exclude addon_name` to force the inclusion of a default-excluded addon.
 
 ## Usage Examples
 

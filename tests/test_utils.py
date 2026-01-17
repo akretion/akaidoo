@@ -30,19 +30,11 @@ class Delegation(models.Model):
     relations = get_model_relations(code)
     
     assert 'sale.order' in relations
-    assert relations['sale.order'] == {
-        'mail.thread', 
-        'mail.activity.mixin', 
-        'res.partner', 
-        'sale.order.line', 
-        'crm.tag'
-    }
-    
+    assert relations['sale.order']['parents'] == {'mail.thread', 'mail.activity.mixin'}
+    assert relations['sale.order']['comodels'] == {'res.partner', 'sale.order.line', 'crm.tag'}
     assert 'sale.order.line' in relations
-    assert relations['sale.order.line'] == {'sale.order.line', 'product.product'} # _inherit is also related
-    
-    assert 'my.mixin' in relations
-    assert relations['my.mixin'] == set()
-    
+    assert not relations['sale.order.line']['parents']
+    assert relations['sale.order.line']['comodels'] == {'product.product'}
+    assert 'my.mixin' in relations # Abstract models should be picked up
     assert 'delegated.model' in relations
-    assert 'parent.model' in relations['delegated.model']
+    assert relations['delegated.model']['parents'] == {'parent.model'}
