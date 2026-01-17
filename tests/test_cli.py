@@ -759,7 +759,6 @@ class MyModel(models.Model):
 """
     )
 
-
     addon_path_str = str(d)
     if addon_path_str.endswith("/"):
         addon_path_str = addon_path_str[:-1]
