@@ -747,14 +747,25 @@ def test_directory_mode_trailing_slash_force(tmp_path):
     (d / "__init__.py").touch()
     (d / "__manifest__.py").write_text("{'name': 'My Addon'}")
     (d / "models").mkdir()
-    (d / "models" / "model.py").write_text("class MyModel: pass")
+    # Create proper Odoo model to avoid pruning
+    (d / "models" / "model.py").write_text(
+        """
+from odoo import models
+
+class MyModel(models.Model):
+    _name = 'my.model'
+    _description = 'My Model'
+    name = fields.Char('Name')
+"""
+    )
+
 
     addon_path_str = str(d)
     if addon_path_str.endswith("/"):
         addon_path_str = addon_path_str[:-1]
 
     # Case 1: NO trailing slash -> Treated as "Project Mode" (valid addon path)
-    result = _run_cli([addon_path_str, "-V"], expected_exit_code=0)
+    result = _run_cli([addon_path_str, "-V", "--prune=none"], expected_exit_code=0)
     # Check logs for "Project Mode" activation
     # Note: Log messages may be in stdout or stderr depending on environment
     combined_output = result.stdout + result.processed_stderr
