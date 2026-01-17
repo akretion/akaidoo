@@ -934,19 +934,26 @@ def resolve_akaidoo_context(
                 if m in all_relations:
                     related_models_set.update(all_relations[m])
             new_related = related_models_set - expand_models_set
-            if new_related and manifestoo_echo_module.verbosity >= 1:
+            if manifestoo_echo_module.verbosity >= 1:
                 echo.info(
-                    f"Related models (not in expanded) ({len(new_related)}): {', '.join(sorted(new_related))}"
+                    f"Auto-expanded models ({len(expand_models_set)}): {', '.join(sorted(expand_models_set))}"
                 )
+                if new_related:
+                    echo.info(
+                        f"Related models (neighbors/parents) ({len(new_related)}): {', '.join(sorted(new_related))}"
+                    )
         elif prune_mode == "medium":
             # Medium: Expanded only, no P/C or related
-            pass
+            if manifestoo_echo_module.verbosity >= 1:
+                echo.info(
+                    f"Relevant models (expanded only) ({len(expand_models_set)}): {', '.join(sorted(expand_models_set))}"
+                )
 
         relevant_models = expand_models_set | related_models_set
 
         if manifestoo_echo_module.verbosity >= 2:
             echo.info(
-                f"Relevant models ({len(relevant_models)}): {', '.join(sorted(relevant_models))}"
+                f"Total relevant models ({len(relevant_models)}): {', '.join(sorted(relevant_models))}"
             )
 
         # 3. Determine Pruned Addons

@@ -27,7 +27,7 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
             "post_init_hook",
             "uninstall_hook",
         }
-        if prune_mode == "soft":
+        if prune_mode in ("soft", "none"):
             keep_keys.add("data")
 
         new_manifest = {k: v for k, v in manifest.items() if k in keep_keys}
