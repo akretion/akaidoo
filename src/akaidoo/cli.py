@@ -1299,6 +1299,12 @@ def akaidoo_command_entrypoint(
         help="Prune mode: none (keep all), soft (expanded + parent/child + related), medium (expanded only), hard (target addons only).",
         case_sensitive=False,
     ),
+    session: bool = typer.Option(
+        False,
+        "--session",
+        help="Create a session.md file with the context map and command.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
@@ -1450,7 +1456,35 @@ Conventions:
         )
     )
 
-    if not output_file and not clipboard and not edit_mode and not show_tree:
+    if session:
+        session_path = Path(".akaidoo/context/session.md")
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        tree_str = get_akaidoo_tree_string(
+            root_addon_names=context.selected_addon_names,
+            addons_set=context.addons_set,
+            addon_files_map=context.addon_files_map,
+            odoo_series=context.final_odoo_series,
+            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            pruned_addons=context.pruned_addons,
+            shrunken_files_info=context.shrunken_files_info,
+        )
+        session_content = f"""# Akaidoo Session: {', '.join(context.selected_addon_names)}
+
+> **Command:** `{' '.join(sys.argv)}`
+> **Timestamp:** {utils.get_timestamp()}
+> **Odoo Series:** {context.final_odoo_series}
+
+## 🗺️ Context Map
+This map shows the active scope. "Pruned" modules are hidden to save focus.
+
+```text
+{tree_str}
+```
+"""
+        session_path.write_text(session_content, encoding="utf-8")
+        typer.echo(typer.style(f"Session map written to {session_path}", bold=True))
+
+    if not output_file and not clipboard and not edit_mode and not show_tree and not session:
         typer.echo("Files list (no output mode selected):")
         for f in context.found_files_list:
             typer.echo(f"- {f}")

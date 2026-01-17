@@ -207,3 +207,10 @@ def get_file_odoo_models(path: Path) -> Set[str]:
         return set(stats.keys())
     except Exception:
         return set()
+
+import datetime
+
+def get_timestamp() -> str:
+    """Returns a UTC timestamp string."""
+    return datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+

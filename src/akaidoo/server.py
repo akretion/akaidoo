@@ -10,57 +10,48 @@ import json
 mcp = FastMCP("Akaidoo")
 
 @mcp.tool()
-def get_odoo_structure(addon_name: str, recursive: bool = True) -> str:
+def get_context_map(addon: str) -> str:
     """
-    Get the Odoo structure (dependency tree) for a given addon.
-    Shows module relationships and file hints (models defined in files).
+    Shows the dependency tree and file hints for an addon. ALWAYS call this first to orient yourself.
+    It helps you understand module relationships before reading any code.
     """
-    # Use default settings for resolving context for structure
-    context = resolve_akaidoo_context(
-        addon_name=addon_name,
-        prune=True,
-    )
-    
+    context = resolve_akaidoo_context(addon_name=addon)
     tree_str = get_akaidoo_tree_string(
         root_addon_names=context.selected_addon_names,
         addons_set=context.addons_set,
         addon_files_map=context.addon_files_map,
-# commented out because arguments mismatch here:
-#        odoo_series=context.final_odoo_series,
-#        exclude_core=context.exclude_core,
-#        fold_framework_addons=context.exclude_framework,
-        framework_addons=FRAMEWORK_ADDONS,
+        odoo_series=context.final_odoo_series,
+        excluded_addons=context.excluded_addons,
         pruned_addons=context.pruned_addons,
+        use_ansi=False,  # Important for machine-readable output
+        shrunken_files_info=context.shrunken_files_info,
     )
     return tree_str
 
 @mcp.tool()
-def read_odoo_context(
-    addon_name: str, 
-    focus_files: Optional[List[str]] = None, 
-    expand_models: Optional[List[str]] = None
+def read_source_code(
+    addon: str,
+    focus_models: Optional[List[str]] = None,
+    expand_models: Optional[List[str]] = None,
 ) -> str:
     """
-    Dump the Odoo context (source code) for a given addon.
-    Optionally focus on specific files or expand specific models.
+    Retrieves Odoo source code. Use this AFTER looking at the map.
+
+    STRATEGY GUIDE:
+    1. **General Coding/Migration:** If writing a new feature or migrating, just provide `addon`.
+       This gives you a broad view of the dependencies.
+    2. **Debugging/Tracebacks:** If you have a traceback error on `account.move`, pass `focus_models=['account.move']`.
+       This isolates the specific logic causing the crash while shrinking everything else.
+    3. **Targeted Expansion:** If you need to see the full definition of a related model,
+       pass `expand_models=['the.model.name']` to see its complete source across the dependency tree.
     """
-    expand_models_str = ",".join(expand_models) if expand_models else None
-    
     context = resolve_akaidoo_context(
-        addon_name=addon_name,
-        expand_models_str=expand_models_str,
-        shrink=True, # Always shrink in MCP dump by default to save tokens
-        prune=True,
+        addon_name=addon,
+        focus_models_str=",".join(focus_models) if focus_models else None,
+        add_expand_str=",".join(expand_models) if expand_models else None,
     )
-    
-    introduction = f"MCP Dump for {addon_name}"
-    
-    dump_str = get_akaidoo_context_dump(
-        context=context,
-        introduction=introduction,
-        focus_files=focus_files,
-    )
-    return dump_str
+    introduction = f"MCP Dump for {addon}"
+    return get_akaidoo_context_dump(context, introduction)
 
 @mcp.tool()
 def ping() -> str:
@@ -70,26 +61,9 @@ def ping() -> str:
 
 @mcp.resource("akaidoo://context/summary")
 def get_summary() -> str:
-    """Get the current Akaidoo session summary."""
-    summary_path = Path(".akaidoo/context/summary.json")
-    summary_md = "# Akaidoo Session Summary\n\n"
-    
+    """Get the current Akaidoo session summary as a mission briefing."""
+    summary_path = Path(".akaidoo/context/session.md")
     if summary_path.exists():
-        try:
-            data = json.loads(summary_path.read_text())
-            addons = ", ".join(data.get("addons", []))
-            focus = ", ".join(data.get("focus_models", []) or []) or "None"
-            summary_md += f"- **Active Addons**: {addons}\n"
-            summary_md += f"- **Focused Models**: {focus}\n"
-        except Exception as e:
-            summary_md += f"Error reading summary.json: {e}\n"
+        return summary_path.read_text()
     else:
-        summary_md += "No active session. Run `akaidoo init` to start one.\n"
-
-    # Add environment info
-    summary_md += "\n## Environment\n"
-    summary_md += f"- **CWD**: {Path.cwd()}\n"
-    if "ODOO_RC" in os.environ:
-        summary_md += f"- **ODOO_RC**: {os.environ['ODOO_RC']}\n"
-    
-    return summary_md
+        return "# Akaidoo Session\n\nNo active session. Run `akaidoo <addon> --session` to start one."
