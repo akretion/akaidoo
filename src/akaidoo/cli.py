@@ -1050,6 +1050,25 @@ def global_callback(
     pass
 
 
+def calculate_context_size(context: AkaidooContext) -> int:
+    """Calculate the total size of the context to be generated."""
+    total_size = 0
+    for fp in context.found_files_list:
+        try:
+            header_path = fp.resolve().relative_to(Path.cwd())
+        except ValueError:
+            header_path = fp.resolve()
+        header = f"# FILEPATH: {header_path}\n"
+        content = context.shrunken_files_content.get(
+            fp.resolve(),
+            re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
+        )
+        total_size += len(header) + len(content) + 2  # for newlines
+    for diff in context.diffs:
+        total_size += len(diff)
+    return total_size
+
+
 @akaidoo_app.command(name="addon")
 def akaidoo_command_entrypoint(
     addon_name: str = typer.Argument(
@@ -1266,12 +1285,20 @@ Conventions:
         introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
-    echo.info(f"Found {len(context.found_files_list)} total files.", bold=True)
+    typer.echo(typer.style(f"Found {len(context.found_files_list)} total files.", bold=True))
 
     if (
         not any([clipboard, output_file, edit_in_editor])
         and context.selected_addon_names
     ):
+        total_size = calculate_context_size(context)
+        typer.echo(
+            typer.style(
+                f"Estimated context size: {total_size / 1024:.2f} KB "
+                f"({total_size * TOKEN_FACTOR / 1000.0:.0f}k Tokens)",
+                bold=True,
+            )
+        )
         print_akaidoo_tree(
             context.selected_addon_names,
             context.addons_set,

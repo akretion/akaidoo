@@ -1101,3 +1101,19 @@ def test_no_pruning_logic_integrated(pruning_env):
     assert "dep_irrelevant" in result.stdout
     assert "[pruned]" not in result.stdout
     assert "models/model_x.py" in result.stdout
+
+
+def test_tree_view_token_estimation(dummy_addons_env):
+    args = [
+        "addon_a",
+        "-c",
+        str(dummy_addons_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
+    ]
+    result = _run_cli(args, expected_exit_code=0)
+    assert "Estimated context size:" in result.stdout
+    assert "KB" in result.stdout
+    assert "Tokens)" in result.stdout
