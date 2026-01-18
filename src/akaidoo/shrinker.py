@@ -1,59 +1,52 @@
+import re
 import sys
 import argparse
+import ast
+import pprint
 from pathlib import Path
 from typing import Optional, Set
-from tree_sitter import Language, Parser
-from tree_sitter_python import language as python_language
-
-# --- Parser Initialization ---
-parser = Parser()
-parser.language = Language(python_language())
+from .utils import _get_odoo_model_names_from_body, parser
 
 
-def get_odoo_model_name(body_node, code_bytes: bytes) -> Optional[str]:
+def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
     """
-    Scans a class body for an assignment to _name or _inherit and returns the string value.
+    Shrinks a manifest content by keeping only essential keys.
     """
-    for child in body_node.children:
-        if child.type == "expression_statement":
-            assign = child.child(0)
-            if assign and assign.type == "assignment":
-                left = assign.child_by_field_name("left")
-                if (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_name"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        # Extract and strip quotes
-                        val = code_bytes[right.start_byte : right.end_byte].decode(
-                            "utf-8"
-                        )
-                        return val.strip("'\"")
-                elif (
-                    left
-                    and left.type == "identifier"
-                    and code_bytes[left.start_byte : left.end_byte].decode("utf-8")
-                    == "_inherit"
-                ):
-                    right = assign.child_by_field_name("right")
-                    if right and right.type == "string":
-                        # Extract and strip quotes
-                        val = code_bytes[right.start_byte : right.end_byte].decode(
-                            "utf-8"
-                        )
-                        return val.strip("'\"")
-    return None
+    try:
+        manifest = ast.literal_eval(content)
+        if not isinstance(manifest, dict):
+            return content
+
+        keep_keys = {
+            "name",
+            "summary",
+            "depends",
+            "external_dependencies",
+            "pre_init_hook",
+            "post_init_hook",
+            "uninstall_hook",
+        }
+        if prune_mode in ("soft", "none"):
+            keep_keys.add("data")
+
+        new_manifest = {k: v for k, v in manifest.items() if k in keep_keys}
+
+        return pprint.pformat(new_manifest, indent=4, sort_dicts=True)
+    except Exception:
+        return content
 
 
 def shrink_python_file(
-    path: str, aggressive: bool = False, expand_models: Optional[Set[str]] = None
-) -> str:
+    path: str,
+    aggressive: bool = False,
+    expand_models: Optional[Set[str]] = None,
+    skip_imports: bool = False,
+    strip_metadata: bool = False,
+) -> tuple[str, Set[str]]:
     """
     Shrinks Python code from a file. If a class matches a model name in
     expand_models, its full content is preserved.
+    Returns (shrunken_content, actually_expanded_models).
     """
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
@@ -62,6 +55,19 @@ def shrink_python_file(
 
     shrunken_parts = []
     expand_models = expand_models or set()
+    actually_expanded_models = set()
+
+    def clean_line(line: str) -> str:
+        if not strip_metadata:
+            return line
+        # Remove help="..." or help='...' (handles basic cases)
+        line = re.sub(r",?\s*help\s*=\s*(?P<q>['\"])(?:(?!\1).)*\1", "", line)
+        # Fix possible double commas or trailing commas before closing paren
+        line = line.replace(", ,", ",").replace(",, ", ", ")
+        line = re.sub(r",\s*\)", ")", line)
+        # Remove end-of-line comment
+        line = re.sub(r"#.*$", "", line)
+        return line.strip()
 
     def process_function(node, indent=""):
         func_def_node = node
@@ -76,6 +82,10 @@ def shrink_python_file(
         if not body_node:
             return
 
+        # If aggressive, we completely skip the function body AND header
+        if aggressive:
+            return
+
         start_byte = node.start_byte
         end_byte = body_node.start_byte
 
@@ -86,11 +96,16 @@ def shrink_python_file(
             stripped_line = line.strip()
             if stripped_line:
                 shrunken_parts.append(f"{indent}{stripped_line}")
-        if not aggressive:
-            shrunken_parts.append(f"{indent}    pass  # shrunk")
+
+        shrunken_parts.append(f"{indent}    pass  # shrunk")
 
     for node in root_node.children:
         if node.type in ("import_statement", "import_from_statement"):
+            if not skip_imports:
+                line_text = (
+                    code_bytes[node.start_byte : node.end_byte].decode("utf8").strip()
+                )
+                shrunken_parts.append(line_text)
             continue
 
         if node.type == "class_definition":
@@ -98,10 +113,11 @@ def shrink_python_file(
             if not body_node:
                 continue
 
-            model_name = get_odoo_model_name(body_node, code_bytes)
-            should_expand = model_name in expand_models
+            model_names = _get_odoo_model_names_from_body(body_node, code_bytes)
+            should_expand = any(m in expand_models for m in model_names)
 
             if should_expand:
+                actually_expanded_models.update(model_names & expand_models)
                 # Copy the whole class definition including header and body
                 class_full_text = code_bytes[node.start_byte : node.end_byte].decode(
                     "utf-8"
@@ -121,33 +137,27 @@ def shrink_python_file(
                         if expr and expr.type == "assignment":
                             line_bytes = code_bytes[child.start_byte : child.end_byte]
                             line_text = line_bytes.decode("utf8").strip()
-                            shrunken_parts.append(f"    {line_text}")
-                    elif (
-                        child.type in ("function_definition", "decorated_definition")
-                        and not aggressive
-                    ):
-                        shrunken_parts.append("")
+                            shrunken_parts.append(f"    {clean_line(line_text)}")
+                    elif child.type in ("function_definition", "decorated_definition"):
                         process_function(child, indent="    ")
             shrunken_parts.append("")
 
-        elif (
-            node.type in ("function_definition", "decorated_definition")
-            and not aggressive
-        ):
+        elif node.type in ("function_definition", "decorated_definition"):
             process_function(node, indent="")
-            shrunken_parts.append("")
+            if not aggressive:
+                shrunken_parts.append("")
 
         elif node.type == "expression_statement":
             expr = node.child(0)
             if expr and expr.type == "assignment":
                 line_bytes = code_bytes[node.start_byte : node.end_byte]
                 line_text = line_bytes.decode("utf8").strip()
-                shrunken_parts.append(line_text)
+                shrunken_parts.append(clean_line(line_text))
 
     while shrunken_parts and shrunken_parts[-1] == "":
         shrunken_parts.pop()
 
-    return "\n".join(shrunken_parts) + "\n"
+    return "\n".join(shrunken_parts) + "\n", actually_expanded_models
 
 
 def main():
@@ -165,7 +175,7 @@ def main():
     expand_set = set(args.expand.split(",")) if args.expand else set()
 
     try:
-        shrunken_content = shrink_python_file(
+        shrunken_content, _ = shrink_python_file(
             args.input_file, aggressive=args.shrink_aggressive, expand_models=expand_set
         )
         if args.output:

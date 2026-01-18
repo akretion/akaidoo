@@ -51,6 +51,10 @@ test = [
     "pytest-mock",
     "typer[all]",
 ]
+mcp = [
+    "mcp",
+    "fastmcp",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "akaidoo.__version__"}

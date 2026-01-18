@@ -2,163 +2,183 @@
   <img src="assets/akaidoo.png" alt="Akaidoo Logo" width="300"/>
 </p>
 
-<h1 align="center">Akaidoo - vibe code your Odoo!</h1>
+<h1 align="center">Akaidoo - Odoo Context Dumper for AI</h1>
 
 <p align="center">
-  <!-- TODO: Uncomment and update badges once set up -->
-  <!-- <a href="YOUR_GITHUB_ACTIONS_LINK"><img src="YOUR_GITHUB_ACTIONS_BADGE_SVG" alt="Build Status"></a> -->
-  <!-- <a href="YOUR_CODECOV_LINK"><img src="YOUR_CODECOV_BADGE_SVG" alt="Coverage Status"></a> -->
   <a href="https://pypi.org/project/akaidoo/"><img src="https://img.shields.io/pypi/v/akaidoo.svg" alt="PyPI version"></a>
   <a href="https://pypi.org/project/akaidoo/"><img src="https://img.shields.io/pypi/pyversions/akaidoo.svg" alt="Python versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/pypi/l/akaidoo.svg" alt="License"></a>
 </p>
 
 <p align="center">
-  <i>Navigate the Odoo & OCA Maze: Instantly Gather Relevant Modules Files.</i>
+  <i>The "Context Map & Dump" Workflow for Odoo AI Agents.</i>
 </p>
 
 ---
 
-**Akaidoo** extends the [manifestoo](https://github.com/acsone/manifestoo) CLI to list
-and copy all relevant source files (Python models, XML views, wizards, data, reports,
-and even OpenUpgrade migration scripts) from a specific Odoo addon and its _entire_
-dependency tree. It's designed to feed AI LLMs.
+**Akaidoo** is the ultimate bridge between your Odoo codebase and Large Language Models
+(LLMs). It extends [manifestoo](https://github.com/acsone/manifestoo) to intelligently
+survey, filter, prune, and dump Odoo source code, providing highly optimized context for
+AI-driven development.
 
-Akaidoo bridges the AI gap for Odoo by helping you:
+It is designed around a powerful **2-Stage Workflow**: first **Map** the context, then
+**Dump** it.
 
-- 🤖 **Boost AI Tools:** Feed precisely the right context to AI LLMs. Works best with
-  Gemini and its 1 million tokens context.
-- 📝 **Streamline Editing:** Open all pertinent files in your editor with a single
-  command.
-- 🧩 **Understand Scope:** Quickly grasp the breadth of an addon's interactions.
-- 🔍 **Perform searches:**
-  (`akaidoo sale_stock -c ~/DEV/odoo16/odoo.cfg | xargs grep "def _compute_price_unit"`)
-- 🚀 **Accelerate Migrations:** Gather module code, dependencies, and their
-  corresponding OpenUpgrade migration scripts in one go.
+## How Akaidoo Thinks: The Core Algorithm
 
-## Key Features
+Akaidoo uses a multi-pass system to make intelligent decisions about what code to
+include and how to format it. Understanding this process is key to mastering its
+powerful features.
 
-- **Deep Dependency Traversal:** Leverages `manifestoo` to accurately resolve all direct
-  and transitive dependencies.
-- **Intelligent File Collection:** Gathers `.py` (models, root files) and `.xml` (views,
-  wizards, reports) from the identified addons.
-- **OpenUpgrade Script Integration:** Optionally include all migration scripts from a
-  specified OpenUpgrade repository for the target addon and its dependencies
-  (`-u, --openupgrade`).
-- **Flexible Addon Discovery:**
-  - Use Odoo configuration files (`-c, --odoo-cfg`).
-  - Specify addon paths directly (`--addons-path`).
-  - Auto-detect from an importable `odoo` package.
-- **Granular Filtering:**
-  - Include/exclude specific file types (models, views, wizards, reports).
-  - Focus _only_ on models or views.
-  - Exclude Odoo core addons (`--exclude-core`) or common framework addons
-    (`--exclude-framework`).
-  - Intelligently skip trivial `__init__.py` files.
-- **Versatile Output Modes:**
-  - **List Paths:** Print file paths to `stdout` (default).
-  - **To Clipboard:** Copy the _content_ of all found files to your clipboard
-    (`-x, --clipboard`), each prefixed with its relative path – perfect for AI prompts!
-  - **To File:** Dump all file contents into a single output file (`-o, --output-file`).
-  - **To Editor:** Directly open all found files in your preferred editor
-    (`-e, --edit`).
-- **Shrink files to save tokens:**
-  - -s to shrink the Python methods in dependencies
-  - -S to shrink the Python methods everywhere
+### Pass 1: Discovery (Build the Knowledge Graph)
 
-## Installation
+Before any action is taken, Akaidoo performs a comprehensive survey of the entire
+codebase (target addons + all dependencies).
 
-<!--- install-begin -->
+1.  **Scan All Python Files**: It quickly parses every `.py` file in the addons path.
+2.  **Map All Relations**: It builds a complete in-memory graph (`all_relations`) that
+    maps every Odoo model to its parents (`_inherit`, `_inherits`) and its comodels
+    (from `Many2one`, `One2many`, `Many2many` fields).
 
-The recommended way to install Akaidoo is using [pipx](https://pypi.org/project/pipx/)
-(to install it in an isolated environment):
+This initial pass solves the "chicken-and-egg" problem: to know which dependencies are
+relevant, you first need a complete map of all relationships.
+
+### Pass 2: Expansion (Define What's "Relevant")
+
+Once the graph is built, Akaidoo determines the set of `relevant_models` that will guide
+the rest of the process.
+
+1.  **Initial Seed**: The process starts with a seed set of models from:
+    - `--auto-expand`: Models in target addons with a high "complexity score" (based on
+      number of fields, methods, and lines of code).
+    - `--focus-models` or `--expand`: Models you explicitly specify.
+2.  **Recursive Parent Expansion**: Akaidoo walks up the inheritance tree. If a model is
+    in the set, and it `_inherit`s another model (e.g., `portal.mixin`), then that
+    parent model is also added to the set of models to be expanded. This continues
+    recursively until all ancestors are included (unless they are in a blacklist).
+3.  **Child Enrichment**: It also looks for `*.line` models (e.g., `sale.order.line`)
+    and adds their parents to the expansion set, ensuring master-detail relationships
+    are complete.
+4.  **Neighbor Resolution**: Finally, it finds all **comodels** related to the
+    now-expanded set. These neighbors are considered "related" but are not themselves
+    fully expanded, providing a layer of context without pulling in unrelated modules.
+
+### Pass 3: Action (Prune, Shrink, and Dump)
+
+With a clear definition of `relevant_models`, Akaidoo takes action:
+
+1.  **Pruning**: It iterates through each addon in the dependency tree and decides
+    whether to keep or discard it based on the `--prune` mode. In `soft` mode (the
+    default), any addon that contains a file defining a `relevant_model` is kept.
+2.  **Shrinking**: For each file in the final, pruned list, it applies the `--shrink`
+    logic:
+    - **Target addons are NEVER shrunk** (unless in `hard` mode). Your primary code is
+      always preserved.
+    - In dependencies, the shrinking is granular:
+      - Files with relevant models are shrunk `soft` (method bodies become
+        `pass # shrunk`).
+      - Files with irrelevant models are shrunk `hard` (methods are removed entirely,
+        along with comments and `help=` tags).
+3.  **Dumping**: The final, processed content is assembled with file path headers and
+    delivered to your clipboard, a file, or the editor.
+
+### Final Output: The Summary
+
+After the tree or dump, Akaidoo provides a summary to help you understand the context
+you've built:
+
+- **Model Lists**: `Auto-expanded`, `Enriched`, and `Other Related` models are listed,
+  sorted by their estimated token size.
+- **Token Highlighting**: Any model contributing more than 5% of the total token count
+  is highlighted in yellow, making it easy to spot and potentially exclude with
+  `--rm-expand`.
+- **Context Size**: A final estimate of the total size in KB and tokens.
+
+---
+
+## 🎛️ Control Specifications
+
+### Shrink Modes (`--shrink`)
+
+_Controls the "Resolution" or level of detail._
+
+| Mode         | Target Addons | Relevant Dependency Models        | Irrelevant Dependency Models | Imports & Metadata |
+| :----------- | :------------ | :-------------------------------- | :--------------------------- | :----------------- |
+| **`none`**   | **Full Code** | **Full Code**                     | **Full Code**                | Kept               |
+| **`soft`**   | **Full Code** | _Shrunken_ (keeps method headers) | _Shrunken_                   | Kept               |
+| **`medium`** | **Full Code** | _Shrunken_                        | **Hard Shrunk**              | **Removed**        |
+| **`hard`**   | _Hard Shrunk_ | **Hard Shrunk**                   | **Hard Shrunk**              | **Removed**        |
+
+- **Shrunken**: Method bodies are replaced with `pass  # shrunk`.
+- **Hard Shrunk**: Method definitions are removed entirely. Comments and field `help`
+  attributes are also stripped.
+
+### Prune Modes (`--prune`)
+
+_Controls the "Framing" or scope of included addons._
+
+| Mode         | Scope          | Description                                                                                          | Use Case                                 |
+| :----------- | :------------- | :--------------------------------------------------------------------------------------------------- | :--------------------------------------- |
+| **`none`**   | **Wide Angle** | Includes **ALL** dependencies.                                                                       | Debugging obscure framework issues.      |
+| **`soft`**   | **Portrait**   | **Default.** Includes target addons + dependencies containing any `relevant_model`.                  | Most development tasks.                  |
+| **`medium`** | **Close-up**   | Includes target addons + dependencies containing only models from the initial auto-expand/focus set. | Focused work on specific business logic. |
+| **`hard`**   | **Macro**      | Includes **only** the Target Addons.                                                                 | Unit testing, independent module work.   |
+
+### Exclusion Logic
+
+_Removes "well-known" clutter to focus on your custom code._
+
+Akaidoo excludes a default list of stable framework modules (`base`, `web`, `mail`,
+etc.) that an LLM should already know well. This is a major token-saving feature.
+
+- Use `--exclude addon_name` to add to the exclusion list.
+- Use `--no-exclude addon_name` to force the inclusion of a default-excluded addon.
+
+## Usage Examples
+
+**1. The "Quick Survey" (Stage 1)** See what `sale_timesheet` pulls in:
 
 ```console
-pipx install akaidoo
+akaidoo sale_timesheet -c odoo.conf
 ```
 
-Alternatively, using pip:
+**2. The "Focused Dump" (Stage 2)** Standard Context for `sale_timesheet`, shrinking
+dependencies, but keeping `project.task` fully expanded:
 
 ```console
-pip install --user akaidoo
+akaidoo sale_timesheet -c odoo.conf --expand project.task -x
 ```
 
-For clipboard functionality (`-x`): Akaidoo uses `pyperclip`. You might need to install
-it and its dependencies:
+**3. Open Models and Views in Editor** Open all relevant files (including views) in your
+editor:
 
 ```console
-pip install pyperclip
-# On Linux, you may also need:
-# sudo apt-get install xclip  # or xsel
+akaidoo project -c odoo.conf --include view -e
 ```
 
-<!--- install-end -->
-
-## Quick Start
-
-Imagine you're working on the `sale_timesheet` addon in an Odoo project.
-
-1.  **Get all relevant file paths for `sale_timesheet` and its dependencies:** (Using
-    your project's Odoo configuration file)
+**4. "High-Level Architecture"** See the data model and API surface of `account` without
+implementation details:
 
 ```console
-akaidoo sale_timesheet -c ~/path/to/your/odoo.conf
+akaidoo account -c odoo.conf --shrink hard -x
 ```
 
-2.  **Copy all Python model code for `sale_timesheet` (without its deps -l) to your
-    clipboard for an AI prompt:**
+**5. Migration Context** Gather code + migration scripts for an upgrade:
 
 ```console
-akaidoo sale_timesheet -c odoo.conf --only-models -l -x
+akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration_context.txt
 ```
 
-    *(Each file's content in the clipboard will be prefixed with `# FILEPATH: path/to/file.py`)*
-
-3.  **Open all Python and XML view files for `project` and its direct dependencies
-    (excluding core) in Neovim (use --editor-cmd or EDITOR env var to specify a
-    different editor):**
+**6. Include Everything** Include models, views, wizards, data, tests, etc.:
 
 ```console
-akaidoo project -c odoo.conf --exclude-core --no-include-wizards --no-include-reports -e
-```
-
-    *(This uses the `nvim -p` command to open files in tabs. It's especially handy when using AI plugins like Avante.)*
-
-4.  **Get only the files from the `mrp` addon itself, ignoring its dependencies, and
-    save their content to a file (useful if you outgrow the clipboard size):**
-
-```console
-akaidoo mrp -c odoo.conf --only-target-addon -o mrp_context.txt
-```
-
-5.  **Gather `sale_stock` files, its dependencies, AND its OpenUpgrade migration
-    scripts:** (Assuming your OpenUpgrade clone is at `~/OpenUpgrade`)
-
-```console
-akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o sale_stock_migration_context.txt
-```
-
-    This will collect all standard module files for `sale_stock` and its dependencies, plus all files from `~/OpenUpgrade/openupgrade_scripts/scripts/sale_stock/`, `~/OpenUpgrade/openupgrade_scripts/scripts/ADDON_DEPENDENCY_1/`, etc., into `sale_stock_migration_context.txt`. This is powerful for feeding comprehensive context to an AI for migration tasks.
-
-6.  Gather the files from any source directory:
-
-```console
-akaidoo some_directory
-```
-
-    If some_directory is not an Odoo addon, then for convenience, akaidoo will select all the files from some_directory (recursively) and copy their content to the clipboard (-x) or to a file (-o) according to the options. It will skip hidden files and __pycache__.
-
-**Exploring All Options:** For a full list of options:
-
-```console
-akaidoo --help
+akaidoo my_module -c odoo.conf --include all
 ```
 
 ## Contributing
 
-Contributions, bug reports, and feature requests are very welcome! Please feel free to
-open an issue or submit a pull request on the GitHub repository.
+Contributions are welcome! Please open an issue or submit a PR on GitHub.
 
 ## License
 
-Akaidoo is licensed under the MIT License.
+MIT License.
