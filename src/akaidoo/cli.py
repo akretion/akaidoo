@@ -10,6 +10,11 @@ import subprocess
 import os
 from git import Repo, InvalidGitRepositoryError
 
+try:
+    from rlm import RLM
+except ImportError:
+    RLM = None
+
 import typer
 from manifestoo_core.addons_set import AddonsSet
 from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
@@ -22,7 +27,7 @@ import manifestoo.echo as manifestoo_echo_module
 from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import print_list, comma_split
 
-from .shrinker import shrink_manifest
+from .shrinker import shrink_manifest, shrink_python_file
 from .utils import (
     get_odoo_model_stats,
     get_timestamp,
@@ -1065,7 +1070,243 @@ def resolve_akaidoo_context(
     )
 
 
+RLM_WORKER_PROMPT = """
+You are an Odoo Code Investigator acting as a REPL agent.
+
+**YOUR MEMORY:**
+You have a global dictionary `context` with two keys:
+1. `context['structure']`: SHRUNKEN code (Classes, method signatures, no bodies).
+2. `context['implementation']`: FULL source code (Raw text).
+
+**PATH STRUCTURE:**
+Keys in `context['structure']` and `context['implementation']` follow the pattern:
+`addon_name/relative/path/to/file.py` (e.g., `sale/models/sale_order.py`).
+ALWAYS use the full key from `context['structure'].keys()`.
+
+**YOUR STRICT PROTOCOL:**
+1. **PHASE 1 (Map):** ALWAYS look at `context['structure']` first to locate relevant files and method names.
+   - *Odoo Note:* Models are often extended across multiple files/modules. Check for ALL files that mention the model name in `context['structure']`.
+2. **PHASE 2 (Zoom):** ONLY once you know the specific file and method name, read the implementation.
+   - If the user asks for "fields" or "logic," you MUST check the original definition AND all extensions you found in the Map phase to provide a complete answer.
+   - *Preferred:* `print(context['implementation']['file.py'])` (Only if file is small).
+   - *Preferred:* Write a small script to extract just the method body or field list you need from the implementation string if the file is huge.
+3. **PHASE 3 (Report):** Answer the user's question based on your findings. Ensure your answer is comprehensive across all modules loaded in context.
+**STRICT REPL RULES:**
+- All code MUST be wrapped in ```repl ... ``` blocks.
+- **DO NOT** use ```python ... ```. It will NOT be executed.
+- You can use `import re`, `import ast`, etc., inside your ```repl``` blocks to process strings.
+
+**FINALIZING:**
+When you have the final answer, you MUST use one of these two functions on the VERY LAST LINE of your response (NOT inside a code block):
+1. `FINAL("Your concise text answer here")` -> Use this for most answers.
+2. `FINAL_VAR("variable_name")` -> Use this ONLY if you have defined `variable_name` in a ```repl``` block in this or a previous turn.
+
+**STRICT RULE:** Do NOT just print the answer. You MUST use one of these functions to signal that you are finished.
+
+**FORBIDDEN:**
+- Do NOT try to print `context['implementation']` keys blindly.
+- Do NOT hallucinate file names. Check `context['structure'].keys()` first.
+"""
+
+
+def _build_rlm_payload(addon: str, **kwargs):
+    # resolve_akaidoo_context is imported from .cli
+    # We use shrink_mode="none" to get full content on disk
+    try:
+        context = resolve_akaidoo_context(
+            addon_name=addon, shrink_mode="none", **kwargs
+        )
+    except Exception:
+        # resolve_akaidoo_context might raise SystemExit or other errors if addon not found
+        # We re-raise to be caught by the tool wrapper
+        raise ValueError(f"Addon '{addon}' not found or invalid.")
+
+    full_source = {}
+    structure = {}
+
+    for addon_name, files in context.addon_files_map.items():
+        addon_obj = context.addons_set.get(addon_name)
+        if not addon_obj:
+            continue
+        addon_root = addon_obj.path.resolve()
+
+        for file_path in files:
+            try:
+                # Calculate relative path: addon_name/path/to/file
+                rel_path = file_path.relative_to(addon_root)
+                key = f"{addon_name}/{rel_path}"
+
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+
+                # Skip trivial files to save tokens and noise
+                if not content.strip():
+                    continue
+                if file_path.name == "__init__.py" and is_trivial_init_py(file_path):
+                    continue
+
+                full_source[key] = content
+
+                if file_path.suffix == ".py":
+                    # shrink_python_file returns (shrunken, expanded_models)
+                    shrunken, _ = shrink_python_file(str(file_path), aggressive=False)
+                    structure[key] = shrunken
+                else:
+                    structure[key] = content
+            except Exception:
+                continue
+
+    return {"structure": structure, "implementation": full_source}
+
+
 akaidoo_app = typer.Typer(help="Akaidoo: Odoo Context Dumper for AI")
+
+
+@akaidoo_app.command(name="ask")
+def ask_command(
+    addon_name: str = typer.Argument(..., help="Target addon to investigate."),
+    question: str = typer.Argument(..., help="Question or task for the agent."),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show RLM internal logs."
+    ),
+    addons_path_str: Optional[str] = typer.Option(
+        None,
+        "--addons-path",
+        help="Comma-separated list of directories to add to the addons path.",
+        show_default=False,
+    ),
+    odoo_cfg: Optional[Path] = typer.Option(
+        None,
+        "-c",
+        "--odoo-cfg",
+        help="Expand addons path from Odoo configuration file.",
+        show_default=False,
+    ),
+    focus_models: Optional[str] = typer.Option(
+        None,
+        "--focus-models",
+        "-F",
+        help="Only expand specific models (comma-separated).",
+    ),
+    include: Optional[str] = typer.Option(
+        None,
+        "--include",
+        "-i",
+        help="Content to include (view, wizard, etc.).",
+    ),
+    prune_mode: str = typer.Option(
+        "soft",
+        "--prune",
+        help="Prune mode: none, soft, medium, hard.",
+    ),
+    model: str = typer.Option(
+        "gemini-2.5-flash",
+        "--model",
+        "-m",
+        help="The model to use. Defaults to gemini-2.5-flash. For GLM, use -m glm-4.7.",
+    ),
+    backend: str = typer.Option(
+        "gemini",
+        "--backend",
+        "-b",
+        help="The RLM backend to use (gemini, glm, openai, anthropic).",
+    ),
+):
+    """
+    Directly query the RLM agent about the codebase.
+    """
+    if RLM is None:
+        echo.error(
+            "Error: 'rlm' package is not installed. Install with 'pip install akaidoo[mcp]'."
+        )
+        raise typer.Exit(1)
+
+    api_key = None
+    if backend == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            echo.error("Error: GEMINI_API_KEY not found in environment.")
+            raise typer.Exit(1)
+    elif backend == "glm":
+        api_key = os.environ.get("Z_AI_API_KEY")
+        if not api_key:
+            echo.error("Error: Z_AI_API_KEY not found in environment.")
+            raise typer.Exit(1)
+    # Add other backends if needed, or use a generic key
+    else:
+        api_key = os.environ.get(f"{backend.upper()}_API_KEY") or os.environ.get(
+            "OPENAI_API_KEY"
+        )
+
+    echo.info(f"Analyzing '{addon_name}'... (Building payload, this may take a moment)")
+
+    try:
+        context_kwargs = {
+            "prune_mode": prune_mode,
+        }
+        if addons_path_str:
+            context_kwargs["addons_path_str"] = addons_path_str
+        if odoo_cfg:
+            context_kwargs["odoo_cfg"] = odoo_cfg
+        if focus_models:
+            context_kwargs["focus_models_str"] = focus_models
+        if include:
+            context_kwargs["include"] = include
+
+        payload = _build_rlm_payload(addon_name, **context_kwargs)
+
+        struct_size = sum(len(v) for v in payload["structure"].values())
+        impl_size = sum(len(v) for v in payload["implementation"].values())
+        total_kb = (struct_size + impl_size) / 1024
+        echo.info(
+            f"Payload built: Structure {struct_size/1024:.1f}KB, Implementation {impl_size/1024:.1f}KB"
+        )
+
+        if total_kb > 2000:
+            echo.warning(f"Large context detected ({total_kb:.1f}KB).")
+            echo.warning(
+                "Consider using --focus-models or --prune hard to speed up the agent."
+            )
+
+    except ValueError as e:
+        echo.error(str(e))
+        raise typer.Exit(1)
+
+    try:
+        echo.info(f"Initializing RLM agent with backend {backend} and model {model}...")
+        rlm = RLM(
+            backend=backend,
+            backend_kwargs={"model_name": model, "api_key": api_key},
+            environment="local",
+            verbose=verbose,
+            custom_system_prompt=RLM_WORKER_PROMPT,
+        )
+
+        echo.info(f"Agent initialized. Sending request to {backend}...")
+
+        # Inject the file list directly into the root prompt to orient the agent immediately
+        keys = sorted(payload["structure"].keys())
+        keys_str = "\n".join(f"- {k}" for k in keys)
+
+        root_prompt = (
+            f"QUERY: {question}\n\n"
+            f"MODULE: {addon_name}\n"
+            f"FILES LOADED IN CONTEXT:\n{keys_str}\n\n"
+            "Orient yourself using the file list above, then use the REPL to dive into the structure and implementation as needed."
+        )
+
+        result = rlm.completion(prompt=payload, root_prompt=root_prompt)
+
+        typer.echo(
+            "\n" + typer.style("=== RLM Response ===", bold=True, fg=typer.colors.GREEN)
+        )
+        typer.echo(result.response)
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        echo.error(f"Error executing RLM agent: {e}")
+        raise typer.Exit(1)
 
 
 @akaidoo_app.command(name="init")
@@ -1700,6 +1941,7 @@ def cli_entry_point():
         "init",
         "addon",
         "serve",
+        "ask",
         "--help",
         "--version",
     ]:
