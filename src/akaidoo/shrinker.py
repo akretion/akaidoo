@@ -37,24 +37,6 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
 
 
 def shrink_python_file(
-    path: str, aggressive: bool = False, expand_models: Optional[Set[str]] = None
-) -> tuple[str, Set[str]]:
-    """
-    Shrinks Python code from a file. If a class matches a model name in
-    expand_models, its full content is preserved.
-    Returns (shrunken_content, actually_expanded_models).
-    """
-    code = Path(path).read_text(encoding="utf-8")
-    code_bytes = bytes(code, "utf8")
-    tree = parser.parse(code_bytes)
-    root_node = tree.root_node
-
-    shrunken_parts = []
-    expand_models = expand_models or set()
-    actually_expanded_models = set()
-
-
-def shrink_python_file(
     path: str,
     aggressive: bool = False,
     expand_models: Optional[Set[str]] = None,
