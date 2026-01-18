@@ -23,13 +23,18 @@ from manifestoo.exceptions import CycleErrorExit
 from manifestoo.utils import print_list, comma_split
 
 from .shrinker import shrink_manifest
-from .utils import get_odoo_model_stats, get_model_relations, AUTO_EXPAND_THRESHOLD
+from .utils import (
+    get_odoo_model_stats,
+    get_timestamp,
+    get_model_relations,
+    AUTO_EXPAND_THRESHOLD,
+)
 from .scanner import (
     is_trivial_init_py,
     scan_directory_files,
     scan_addon_files,
 )
-from .tree import print_akaidoo_tree
+from .tree import print_akaidoo_tree, get_akaidoo_tree_string
 
 TOKEN_ESTIMATION_FACTOR = 0.27
 
@@ -1512,7 +1517,7 @@ Conventions:
         session_content = f"""# Akaidoo Session: {', '.join(context.selected_addon_names)}
 
 > **Command:** `{' '.join(sys.argv)}`
-> **Timestamp:** {utils.get_timestamp()}
+> **Timestamp:** {get_timestamp()}
 > **Odoo Series:** {context.final_odoo_series}
 
 ## 🗺️ Context Map
