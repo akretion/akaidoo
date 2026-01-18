@@ -154,10 +154,18 @@ class AkaidooNode:
                     is_shrunk = shrink_info is not None
 
                     is_aggressive = False
+                    shrink_level = None
                     expanded_models = set()
 
                     if is_shrunk:
-                        is_aggressive = shrink_info.get("aggressive", False)
+                        shrink_level = shrink_info.get("shrink_level")
+                        # Support legacy 'aggressive' if present
+                        is_aggressive = shrink_info.get(
+                            "aggressive", False
+                        ) or shrink_level in (
+                            "hard",
+                            "extreme",
+                        )
                         expanded_models = shrink_info.get("expanded_models", set())
 
                     # If file is aggressively shrunk OR standard shrink with NO expanded models, dim the file line
@@ -192,7 +200,12 @@ class AkaidooNode:
                             _append("]", nl=False, dim=True)
 
                     if is_shrunk:
-                        tag = " [shrunk (hard)]" if is_aggressive else " [shrunk]"
+                        if shrink_level == "extreme":
+                            tag = " [shrunk (max)]"
+                        elif shrink_level == "hard" or is_aggressive:
+                            tag = " [shrunk (hard)]"
+                        else:
+                            tag = " [shrunk]"
                         _append(tag, nl=False, dim=True)
 
                     _append("")  # End line

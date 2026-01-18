@@ -4,7 +4,7 @@ import argparse
 import ast
 import pprint
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 from .utils import _get_odoo_model_names_from_body, parser
 
 
@@ -36,18 +36,134 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
         return content
 
 
+def _get_field_info(node, code_bytes: bytes) -> Dict:
+    """
+    Extracts info from a field assignment node.
+    Returns: {
+        'name': str,
+        'type': str (Many2one, etc.),
+        'comodel': str,
+        'compute': str (method name),
+        'store': bool,
+        'is_field': bool
+    }
+    """
+    info = {
+        "name": None,
+        "type": None,
+        "comodel": None,
+        "compute": None,
+        "store": None,
+        "is_field": False,
+    }
+
+    if node.type != "expression_statement":
+        return info
+    assign = node.child(0)
+    if not assign or assign.type != "assignment":
+        return info
+
+    left = assign.child_by_field_name("left")
+    if not left or left.type != "identifier":
+        return info
+
+    info["name"] = code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+    if info["name"].startswith("_"):
+        return info
+
+    right = assign.child_by_field_name("right")
+    if not right or right.type != "call":
+        return info
+
+    func = right.child_by_field_name("function")
+    if not func or func.type != "attribute":
+        return info
+
+    obj = func.child_by_field_name("object")
+    attr = func.child_by_field_name("attribute")
+
+    if not obj or obj.type != "identifier" or not attr or attr.type != "identifier":
+        return info
+
+    obj_name = code_bytes[obj.start_byte : obj.end_byte].decode("utf-8")
+    attr_name = code_bytes[attr.start_byte : attr.end_byte].decode("utf-8")
+
+    if obj_name not in ("fields", "models"):
+        return info
+
+    info["is_field"] = True
+    info["type"] = attr_name
+
+    args = right.child_by_field_name("arguments")
+    if args:
+        # Relational fields: first arg is comodel
+        if attr_name in ("Many2one", "One2many", "Many2many"):
+            for arg in args.children:
+                if arg.type == "string":
+                    val = code_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
+                    info["comodel"] = val.strip("'\"")
+                    break
+                elif arg.type in (
+                    "identifier",
+                    "attribute",
+                    "call",
+                    "integer",
+                    "float",
+                ):
+                    break
+
+        # Keyword arguments: compute, store, comodel_name
+        for arg in args.children:
+            if arg.type == "keyword_argument":
+                key_node = arg.child_by_field_name("name")
+                val_node = arg.child_by_field_name("value")
+                if key_node and val_node:
+                    key = code_bytes[key_node.start_byte : key_node.end_byte].decode(
+                        "utf-8"
+                    )
+                    if key == "compute":
+                        if val_node.type == "string":
+                            val = code_bytes[
+                                val_node.start_byte : val_node.end_byte
+                            ].decode("utf-8")
+                            info["compute"] = val.strip("'\"")
+                    elif key == "store":
+                        if val_node.type == "true":
+                            info["store"] = True
+                        elif val_node.type == "false":
+                            info["store"] = False
+                    elif key == "comodel_name" and val_node.type == "string":
+                        val = code_bytes[
+                            val_node.start_byte : val_node.end_byte
+                        ].decode("utf-8")
+                        info["comodel"] = val.strip("'\"")
+
+    return info
+
+
 def shrink_python_file(
     path: str,
     aggressive: bool = False,
     expand_models: Optional[Set[str]] = None,
     skip_imports: bool = False,
     strip_metadata: bool = False,
+    shrink_level: Optional[str] = None,
+    relevant_models: Optional[Set[str]] = None,
+    prune_methods: Optional[Set[str]] = None,
 ) -> tuple[str, Set[str]]:
     """
-    Shrinks Python code from a file. If a class matches a model name in
-    expand_models, its full content is preserved.
+    Shrinks Python code from a file.
+    shrink_level: 'none', 'soft', 'hard', 'extreme'
+    If aggressive is True, it forces at least 'hard'.
+    prune_methods: set of "ModelName.method_name" to force prune.
     Returns (shrunken_content, actually_expanded_models).
     """
+    if shrink_level is None:
+        shrink_level = "hard" if aggressive else "soft"
+
+    if shrink_level == "none" and not prune_methods:
+        return Path(path).read_text(encoding="utf-8"), set()
+
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
     tree = parser.parse(code_bytes)
@@ -55,21 +171,25 @@ def shrink_python_file(
 
     shrunken_parts = []
     expand_models = expand_models or set()
+    relevant_models = relevant_models or set()
+    prune_methods = prune_methods or set()
     actually_expanded_models = set()
 
     def clean_line(line: str) -> str:
         if not strip_metadata:
             return line
-        # Remove help="..." or help='...' (handles basic cases)
         line = re.sub(r",?\s*help\s*=\s*(?P<q>['\"])(?:(?!\1).)*\1", "", line)
-        # Fix possible double commas or trailing commas before closing paren
         line = line.replace(", ,", ",").replace(",, ", ", ")
         line = re.sub(r",\s*\)", ")", line)
-        # Remove end-of-line comment
         line = re.sub(r"#.*$", "", line)
         return line.strip()
 
-    def process_function(node, indent=""):
+    def process_function(
+        node, indent="", context_models: Set[str] = None, override_level: str = None
+    ):
+        effective_level = override_level if override_level else shrink_level
+
+        # 1. Resolve function definition node (handle decorators)
         func_def_node = node
         if node.type == "decorated_definition":
             definition = node.child_by_field_name("definition")
@@ -78,12 +198,27 @@ def shrink_python_file(
             else:
                 return
 
-        body_node = func_def_node.child_by_field_name("body")
-        if not body_node:
+        # 2. Check for specific pruning request
+        should_prune_specifically = False
+        if context_models:
+            func_name_node = func_def_node.child_by_field_name("name")
+            if func_name_node:
+                func_name = code_bytes[
+                    func_name_node.start_byte : func_name_node.end_byte
+                ].decode("utf-8")
+                # print(f"DEBUG: Checking method {func_name} in models {context_models}. prune_methods={prune_methods}", file=sys.stderr)
+                for m in context_models:
+                    if f"{m}.{func_name}" in prune_methods:
+                        should_prune_specifically = True
+                        # print(f"DEBUG: Match found for {m}.{func_name}", file=sys.stderr)
+                        break
+
+        # 3. Global prune check
+        if effective_level in ("hard", "extreme") and not should_prune_specifically:
             return
 
-        # If aggressive, we completely skip the function body AND header
-        if aggressive:
+        body_node = func_def_node.child_by_field_name("body")
+        if not body_node:
             return
 
         start_byte = node.start_byte
@@ -92,12 +227,24 @@ def shrink_python_file(
         header_bytes = code_bytes[start_byte:end_byte]
         header_text = header_bytes.decode("utf8").strip()
 
-        for line in header_text.splitlines():
-            stripped_line = line.strip()
-            if stripped_line:
-                shrunken_parts.append(f"{indent}{stripped_line}")
+        if should_prune_specifically:
+            for line in header_text.splitlines():
+                stripped_line = line.strip()
+                if stripped_line:
+                    shrunken_parts.append(f"{indent}{stripped_line}")
+            shrunken_parts.append(f"{indent}    pass  # pruned by request")
+            return
 
-        shrunken_parts.append(f"{indent}    pass  # shrunk")
+        if effective_level == "soft":
+            for line in header_text.splitlines():
+                stripped_line = line.strip()
+                if stripped_line:
+                    shrunken_parts.append(f"{indent}{stripped_line}")
+            shrunken_parts.append(f"{indent}    pass  # shrunk")
+            return
+
+        full_text = code_bytes[start_byte : node.end_byte].decode("utf-8")
+        shrunken_parts.append(full_text)
 
     for node in root_node.children:
         if node.type in ("import_statement", "import_from_statement"):
@@ -116,35 +263,98 @@ def shrink_python_file(
             model_names = _get_odoo_model_names_from_body(body_node, code_bytes)
             should_expand = any(m in expand_models for m in model_names)
 
-            if should_expand:
+            has_pruned_methods = False
+            for m in model_names:
+                for pm in prune_methods:
+                    if pm.startswith(f"{m}."):
+                        has_pruned_methods = True
+                        break
+                if has_pruned_methods:
+                    break
+
+            # print(f"DEBUG: Class models={model_names}, should_expand={should_expand}, has_pruned_methods={has_pruned_methods}", file=sys.stderr)
+
+            if should_expand and not has_pruned_methods:
                 actually_expanded_models.update(model_names & expand_models)
-                # Copy the whole class definition including header and body
                 class_full_text = code_bytes[node.start_byte : node.end_byte].decode(
                     "utf-8"
                 )
                 shrunken_parts.append(class_full_text)
             else:
-                # Standard shrinking logic
+                effective_level = shrink_level
+                if should_expand:
+                    effective_level = "none"
+                    actually_expanded_models.update(model_names & expand_models)
+
                 header_end = body_node.start_byte
                 class_header = (
                     code_bytes[node.start_byte : header_end].decode("utf8").strip()
                 )
                 shrunken_parts.append(class_header)
 
+                non_computed_fields = []
+                computed_fields = []
+
                 for child in body_node.children:
                     if child.type == "expression_statement":
                         expr = child.child(0)
                         if expr and expr.type == "assignment":
-                            line_bytes = code_bytes[child.start_byte : child.end_byte]
-                            line_text = line_bytes.decode("utf8").strip()
-                            shrunken_parts.append(f"    {clean_line(line_text)}")
+                            if effective_level == "none":
+                                line_bytes = code_bytes[
+                                    child.start_byte : child.end_byte
+                                ]
+                                line_text = line_bytes.decode("utf8").strip()
+                                shrunken_parts.append(f"    {line_text}")
+                                continue
+
+                            f_info = _get_field_info(child, code_bytes)
+                            if f_info["is_field"] and effective_level == "extreme":
+                                # Field summary logic
+                                if f_info["compute"]:
+                                    f_label = f"{f_info['name']} ({f_info['compute']})"
+                                    computed_fields.append(f_label)
+                                else:
+                                    non_computed_fields.append(f_info["name"])
+
+                                # Detailed relation if comodel is relevant
+                                if f_info["comodel"] in relevant_models:
+                                    line_bytes = code_bytes[
+                                        child.start_byte : child.end_byte
+                                    ]
+                                    line_text = line_bytes.decode("utf8").strip()
+                                    shrunken_parts.append(
+                                        f"    {_strip_field_metadata(line_text)}"
+                                    )
+                            else:
+                                line_bytes = code_bytes[
+                                    child.start_byte : child.end_byte
+                                ]
+                                line_text = line_bytes.decode("utf8").strip()
+                                shrunken_parts.append(f"    {clean_line(line_text)}")
+
                     elif child.type in ("function_definition", "decorated_definition"):
-                        process_function(child, indent="    ")
+                        process_function(
+                            child,
+                            indent="    ",
+                            context_models=model_names,
+                            override_level=effective_level,
+                        )
+
+                if effective_level == "extreme":
+                    if non_computed_fields:
+                        shrunken_parts.append(
+                            f"    # Shrunk non computed fields: {', '.join(non_computed_fields)}"
+                        )
+                    if computed_fields:
+                        shrunken_parts.append(
+                            f"    # Shrunk computed_fields: {', '.join(computed_fields)}"
+                        )
+
             shrunken_parts.append("")
 
         elif node.type in ("function_definition", "decorated_definition"):
             process_function(node, indent="")
-            if not aggressive:
+            if shrink_level == "soft":
                 shrunken_parts.append("")
 
         elif node.type == "expression_statement":
@@ -160,6 +370,15 @@ def shrink_python_file(
     return "\n".join(shrunken_parts) + "\n", actually_expanded_models
 
 
+def _strip_field_metadata(line: str) -> str:
+    line = re.sub(r",?\s*help\s*=\s*(?P<q>['\"])(?:(?!\1).)*\1", "", line)
+    line = re.sub(r",?\s*string\s*=\s*(?P<q>['\"])(?:(?!\1).)*\1", "", line)
+    line = line.replace(", ,", ",").replace(",, ", ", ")
+    line = re.sub(r",\s*\)", ")", line)
+    line = re.sub(r"#.*$", "", line)
+    return line.strip()
+
+
 def main():
     cli_parser = argparse.ArgumentParser(
         description="Shrink a Python file to its structural components."
@@ -167,16 +386,34 @@ def main():
     cli_parser.add_argument("input_file", type=str)
     cli_parser.add_argument("-S", "--shrink-aggressive", action="store_true")
     cli_parser.add_argument(
+        "-L",
+        "--shrink-level",
+        type=str,
+        choices=["none", "soft", "hard", "extreme"],
+        default=None,
+    )
+    cli_parser.add_argument(
         "-E", "--expand", type=str, help="Comma separated models to expand."
+    )
+    cli_parser.add_argument(
+        "-P",
+        "--prune-methods",
+        type=str,
+        help="Comma separated methods to prune (Model.method).",
     )
     cli_parser.add_argument("-o", "--output", type=str)
     args = cli_parser.parse_args()
 
     expand_set = set(args.expand.split(",")) if args.expand else set()
+    prune_set = set(args.prune_methods.split(",")) if args.prune_methods else set()
 
     try:
         shrunken_content, _ = shrink_python_file(
-            args.input_file, aggressive=args.shrink_aggressive, expand_models=expand_set
+            args.input_file,
+            aggressive=args.shrink_aggressive,
+            shrink_level=args.shrink_level,
+            expand_models=expand_set,
+            prune_methods=prune_set,
         )
         if args.output:
             Path(args.output).write_text(shrunken_content, encoding="utf-8")

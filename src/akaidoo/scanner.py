@@ -21,6 +21,44 @@ BINARY_EXTS = (
     ".map",
 )
 
+SHRINK_MATRIX = {
+    "none": {
+        "T_EXP": "none",
+        "T_OTH": "none",
+        "D_EXP": "none",
+        "D_REL": "none",
+        "D_OTH": "none",
+    },
+    "soft": {
+        "T_EXP": "none",
+        "T_OTH": "none",
+        "D_EXP": "soft",
+        "D_REL": "soft",
+        "D_OTH": "soft",
+    },
+    "medium": {
+        "T_EXP": "none",
+        "T_OTH": "soft",
+        "D_EXP": "soft",
+        "D_REL": "hard",
+        "D_OTH": "hard",
+    },
+    "hard": {
+        "T_EXP": "soft",
+        "T_OTH": "hard",
+        "D_EXP": "hard",
+        "D_REL": "hard",
+        "D_OTH": "hard",
+    },
+    "extreme": {
+        "T_EXP": "soft",
+        "T_OTH": "extreme",
+        "D_EXP": "extreme",
+        "D_REL": "extreme",
+        "D_OTH": "extreme",
+    },
+}
+
 
 def is_trivial_init_py(file_path: Path) -> bool:
     try:
@@ -75,6 +113,7 @@ def scan_addon_files(
     relevant_models: Optional[Set[str]] = None,
     prune_mode: str = "soft",
     shrunken_files_info: Optional[Dict[Path, Dict]] = None,
+    prune_methods: Optional[Set[str]] = None,
 ) -> List[Path]:
     """Scan an Odoo addon directory for relevant files based on filters."""
     found_files = []
@@ -85,6 +124,7 @@ def scan_addon_files(
     expand_models_set = expand_models_set if expand_models_set is not None else set()
     relevant_models = relevant_models if relevant_models is not None else set()
     excluded_addons = excluded_addons if excluded_addons is not None else set()
+    prune_methods = prune_methods if prune_methods is not None else set()
 
     scan_roots: List[str] = []
     if "model" in includes:
@@ -128,11 +168,6 @@ def scan_addon_files(
     if "static" in includes:
         if ".js" not in current_addon_extensions:
             current_addon_extensions.append(".js")
-        # Static can also have .xml (qweb) but usually in static/src/xml or similar
-        # We recursively scan roots, so if we add static, we might need more extensions?
-        # For now, let's keep it simple or match standard Odoo static assets.
-        # But 'scan_addon_files' iterates 'ext'.
-        # If I add .js, scan_path_dir.glob("*.js") works.
 
     if not current_addon_extensions:
         return []
@@ -144,13 +179,10 @@ def scan_addon_files(
 
         for ext in current_addon_extensions:
             files_to_check: List[Path] = []
-            # Glob logic based on root_name and ext
             if root_name == ".":
                 if ext == ".py":
                     files_to_check.extend(scan_path_dir.glob("*.py"))
             else:
-                # Recursive scan for subdirs
-                # Note: scan_path_dir.glob(f"**/*{ext}")
                 files_to_check.extend(scan_path_dir.glob(f"**/*{ext}"))
 
             for found_file in files_to_check:
@@ -178,10 +210,10 @@ def scan_addon_files(
                 is_view_file = "views" in relative_path_parts and ext == ".xml"
                 is_wizard_file = (
                     "wizard" in relative_path_parts or "wizards" in relative_path_parts
-                ) and (ext == ".xml" or ext == ".py")  # Wizards have py and xml!
+                ) and (ext == ".xml" or ext == ".py")
                 is_report_file = (
                     "report" in relative_path_parts or "reports" in relative_path_parts
-                ) and (ext == ".xml" or ext == ".py")  # Reports have py and xml
+                ) and (ext == ".xml" or ext == ".py")
                 is_data_file = ("data" in relative_path_parts) and ext in (
                     ".csv",
                     ".xml",
@@ -227,7 +259,7 @@ def scan_addon_files(
                 abs_file_path = found_file.resolve()
                 if abs_file_path not in found_files:
                     # Large Data File Truncation
-                    if is_data_file or (ext == ".csv"):  # Security CSVs too?
+                    if is_data_file or (ext == ".csv"):
                         try:
                             size = found_file.stat().st_size
                             if size > MAX_DATA_FILE_SIZE:
@@ -264,52 +296,51 @@ def scan_addon_files(
                             continue
 
                     if shrink_mode != "none" and found_file.suffix == ".py":
-                        # Manifests are handled specially in cli.py
                         if found_file.name != "__manifest__.py":
-                            file_is_relevant = any(
-                                model in relevant_models for model in file_models
+                            file_is_expanded = any(
+                                m in expand_models_set for m in file_models
+                            )
+                            file_is_related = any(
+                                m in relevant_models for m in file_models
                             )
 
-                            should_shrink = False
-                            aggressive = False
-
-                            if shrink_mode == "soft":
-                                should_shrink = not file_in_target_addon
-                                aggressive = False
-
-                            elif shrink_mode == "medium":
-                                if file_in_target_addon:
-                                    should_shrink = False
-                                elif file_is_relevant:
-                                    # Relevant dependency: soft shrink
-                                    should_shrink = True
-                                    aggressive = False
+                            category = "D_OTH"
+                            if file_in_target_addon:
+                                if file_is_expanded:
+                                    category = "T_EXP"
                                 else:
-                                    # Irrelevant dependency: aggressive shrink
-                                    should_shrink = True
-                                    aggressive = True
+                                    category = "T_OTH"
+                            else:
+                                if file_is_expanded:
+                                    category = "D_EXP"
+                                elif file_is_related:
+                                    category = "D_REL"
+                                else:
+                                    category = "D_OTH"
 
-                            elif shrink_mode == "hard":
-                                should_shrink = True
-                                aggressive = True
+                            effort = shrink_mode.lower()
+                            matrix_row = SHRINK_MATRIX.get(
+                                effort, SHRINK_MATRIX["soft"]
+                            )
+                            shrink_level = matrix_row.get(category, "soft")
 
-                            if should_shrink:
+                            if shrink_level != "none":
                                 shrunken_content, actually_expanded = (
                                     shrink_python_file(
                                         str(found_file),
-                                        aggressive=aggressive,
+                                        shrink_level=shrink_level,
                                         expand_models=expand_models_set,
-                                        skip_imports=(
-                                            shrink_mode in ("medium", "hard")
-                                        ),
+                                        skip_imports=(shrink_mode != "none"),
                                         strip_metadata=(
-                                            shrink_mode in ("medium", "hard")
+                                            shrink_level in ("hard", "extreme")
                                         ),
+                                        relevant_models=relevant_models,
+                                        prune_methods=prune_methods,
                                     )
                                 )
                                 shrunken_files_content[abs_file_path] = shrunken_content
                                 shrunken_files_info[abs_file_path] = {
-                                    "aggressive": aggressive,
+                                    "shrink_level": shrink_level,
                                     "expanded_models": actually_expanded,
                                 }
                     found_files.append(abs_file_path)

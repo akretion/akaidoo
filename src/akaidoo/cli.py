@@ -39,7 +39,7 @@ from .tree import print_akaidoo_tree, get_akaidoo_tree_string
 TOKEN_ESTIMATION_FACTOR = 0.27
 
 PRUNE_MODES = ["none", "soft", "medium", "hard"]
-SHRINK_MODES = ["none", "soft", "medium", "hard"]
+SHRINK_MODES = ["none", "soft", "medium", "hard", "extreme"]
 
 try:
     from importlib import metadata
@@ -495,6 +495,7 @@ def resolve_akaidoo_context(
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
     prune_mode: str = "soft",
+    prune_methods_str: Optional[str] = None,
 ) -> AkaidooContext:
     found_files_list: List[Path] = []
     addon_files_map: Dict[str, List[Path]] = {}
@@ -547,46 +548,9 @@ def resolve_akaidoo_context(
     if rm_expand_str:
         rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
 
-    # If focus models are provided, auto-expand is disabled automatically
-    if focus_models_str and auto_expand:
-        auto_expand = False
-
-    focus_modes_count = sum([bool(focus_models_str), bool(add_expand_str), auto_expand])
-    if focus_modes_count > 1:
-        focus_flags = [
-            name
-            for flag, name in [
-                (focus_models_str, "--focus-models"),
-                (add_expand_str, "--add-expand"),
-                (auto_expand, "--auto-expand"),
-            ]
-            if flag
-        ]
-        echo.error(
-            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
-            "Use either --focus-models, --add-expand, or --auto-expand."
-        )
-        raise typer.Exit(1)
-
-    if focus_models_str:
-        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
-        auto_expand = False
-        expand_models_set = focus_models_set.copy()
-    elif add_expand_str:
-        add_expand_set = {m.strip() for m in add_expand_str.split(",")}
-    elif auto_expand:
-        pass
-
-    # Apply rm_expand
-    if rm_expand_set:
-        expand_models_set = expand_models_set - rm_expand_set
-        if rm_expand_set and manifestoo_echo_module.verbosity >= 1:
-            echo.info(
-                f"Removed {len(rm_expand_set)} models from auto-expand set: {', '.join(sorted(rm_expand_set))}"
-            )
-
-    focus_models_set: set[str] = set()
-    add_expand_set: set[str] = set()
+    prune_methods_set: set[str] = set()
+    if prune_methods_str:
+        prune_methods_set = {m.strip() for m in prune_methods_str.split(",")}
 
     # If focus models are provided, auto-expand is disabled automatically
     if focus_models_str and auto_expand:
@@ -948,6 +912,16 @@ def resolve_akaidoo_context(
                 related_models_set.update(filtered_neighbors)
         new_related = related_models_set - expand_models_set
 
+    # Apply user overrides
+    if rm_expand_set:
+        expand_models_set -= rm_expand_set
+        related_models_set -= rm_expand_set
+        new_related -= rm_expand_set
+        if manifestoo_echo_module.verbosity >= 1:
+            echo.info(
+                f"Removed {len(rm_expand_set)} models from expand/related sets: {', '.join(sorted(rm_expand_set))}"
+            )
+
     relevant_models = expand_models_set | related_models_set
 
     # --- Pass 3: Action (Scanning, Shrinking and Filtering) ---
@@ -1027,6 +1001,7 @@ def resolve_akaidoo_context(
                 relevant_models=relevant_models,
                 prune_mode=prune_mode,
                 shrunken_files_info=shrunken_files_info,
+                prune_methods=prune_methods_set,
             )
             addon_files_map[addon_to_scan_name] = addon_files
 
@@ -1271,7 +1246,7 @@ def akaidoo_command_entrypoint(
     shrink_mode: str = typer.Option(
         "soft",
         "--shrink",
-        help="Shrink mode: none (no shrink), soft (deps shrunk with 'pass # shrunk', targets full), medium (relevant: soft in deps/none in targets, irrelevant: hard everywhere), hard (all methods removed).",
+        help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), extreme (max shrink everywhere).",
         case_sensitive=False,
     ),
     expand_models_str: Optional[str] = typer.Option(
@@ -1335,6 +1310,12 @@ def akaidoo_command_entrypoint(
         help="Prune mode: none (keep all), soft (expanded + parent/child + related), medium (expanded only), hard (target addons only).",
         case_sensitive=False,
     ),
+    prune_methods_str: Optional[str] = typer.Option(
+        None,
+        "--prune-methods",
+        "-P",
+        help="Comma-separated list of methods to force prune (e.g. 'Model.method').",
+    ),
     session: bool = typer.Option(
         False,
         "--session",
@@ -1367,6 +1348,7 @@ def akaidoo_command_entrypoint(
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
         prune_mode=prune_mode,
+        prune_methods_str=prune_methods_str,
     )
 
     edit_mode = edit_in_editor

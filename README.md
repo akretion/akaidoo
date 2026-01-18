@@ -59,9 +59,11 @@ the rest of the process.
 3.  **Child Enrichment**: It also looks for `*.line` models (e.g., `sale.order.line`)
     and adds their parents to the expansion set, ensuring master-detail relationships
     are complete.
-4.  **Neighbor Resolution**: Finally, it finds all **comodels** related to the
-    now-expanded set. These neighbors are considered "related" but are not themselves
-    fully expanded, providing a layer of context without pulling in unrelated modules.
+4.  **Neighbor Resolution**: It finds all **comodels** related to the now-expanded set.
+    These neighbors are considered "related" but are not themselves fully expanded,
+    providing a layer of context without pulling in unrelated modules.
+5.  **User Overrides**: Finally, any models explicitly removed with `--rm-expand` are
+    subtracted from all relevant sets, effectively pruning them from the expanded scope.
 
 ### Pass 3: Action (Prune, Shrink, and Dump)
 
@@ -71,14 +73,13 @@ With a clear definition of `relevant_models`, Akaidoo takes action:
     whether to keep or discard it based on the `--prune` mode. In `soft` mode (the
     default), any addon that contains a file defining a `relevant_model` is kept.
 2.  **Shrinking**: For each file in the final, pruned list, it applies the `--shrink`
-    logic:
-    - **Target addons are NEVER shrunk** (unless in `hard` mode). Your primary code is
-      always preserved.
-    - In dependencies, the shrinking is granular:
-      - Files with relevant models are shrunk `soft` (method bodies become
-        `pass # shrunk`).
-      - Files with irrelevant models are shrunk `hard` (methods are removed entirely,
-        along with comments and `help=` tags).
+    effort. This effort level determines how aggressively to shrink code based on the
+    model's category:
+    - **T_EXP**: Expanded models in Target addons.
+    - **T_OTH**: Other models in Target addons.
+    - **D_EXP**: Expanded models in Dependency addons.
+    - **D_REL**: Related models (neighbors) in Dependency addons.
+    - **D_OTH**: Other models in Dependency addons.
 3.  **Dumping**: The final, processed content is assembled with file path headers and
     delivered to your clipboard, a file, or the editor.
 
@@ -100,18 +101,43 @@ you've built:
 
 ### Shrink Modes (`--shrink`)
 
-_Controls the "Resolution" or level of detail._
+The `--shrink` option sets the **Shrink Effort**, determining the "Resolution" for
+different categories of models.
 
-| Mode         | Target Addons | Relevant Dependency Models        | Irrelevant Dependency Models | Imports & Metadata |
-| :----------- | :------------ | :-------------------------------- | :--------------------------- | :----------------- |
-| **`none`**   | **Full Code** | **Full Code**                     | **Full Code**                | Kept               |
-| **`soft`**   | **Full Code** | _Shrunken_ (keeps method headers) | _Shrunken_                   | Kept               |
-| **`medium`** | **Full Code** | _Shrunken_                        | **Hard Shrunk**              | **Removed**        |
-| **`hard`**   | _Hard Shrunk_ | **Hard Shrunk**                   | **Hard Shrunk**              | **Removed**        |
+**Model Categories:**
 
-- **Shrunken**: Method bodies are replaced with `pass  # shrunk`.
-- **Hard Shrunk**: Method definitions are removed entirely. Comments and field `help`
-  attributes are also stripped.
+- **T_EXP**: Target Addon, Expanded Model (via auto-expand or explicit).
+- **T_OTH**: Target Addon, Other Model.
+- **D_EXP**: Dependency Addon, Expanded Model.
+- **D_REL**: Dependency Addon, Related Model (neighbor/parent).
+- **D_OTH**: Dependency Addon, Other Model.
+
+**Shrink Levels:**
+
+- **FULL**: Full code (imports kept).
+- **SOFT**: Method bodies replaced with `pass # shrunk`. Imports skipped.
+- **HARD**: Methods removed entirely. Metadata (string, help) removed. Imports skipped.
+- **MAX**: Fields summarized (one line for stored, one for stored non-computed).
+  Relational fields to relevant models detailed.
+
+**The Shrink Matrix:**
+
+| Effort Level         | T_EXP | T_OTH | D_EXP | D_REL | D_OTH |
+| :------------------- | :---- | :---- | :---- | :---- | :---- |
+| **`none`**           | FULL  | FULL  | FULL  | FULL  | FULL  |
+| **`soft`** (default) | FULL  | FULL  | SOFT  | SOFT  | SOFT  |
+| **`medium`**         | FULL  | SOFT  | SOFT  | HARD  | HARD  |
+| **`hard`**           | SOFT  | HARD  | HARD  | HARD  | HARD  |
+| **`extreme`**        | SOFT  | MAX   | MAX   | MAX   | MAX   |
+
+### Fine-Grained Controls
+
+- **`--rm-expand <model>`**: Remove a model from the expanded set (even if
+  auto-expanded). Useful for cutting out large mixins like `mail.thread` or
+  `analytic.mixin` if they clutter the context.
+- **`--prune-methods <Model.method>`**: Force-prune specific large methods even in
+  expanded models. Useful for removing boilerplate or huge utility methods while keeping
+  the rest of the logic.
 
 ### Prune Modes (`--prune`)
 
@@ -149,18 +175,18 @@ dependencies, but keeping `project.task` fully expanded:
 akaidoo sale_timesheet -c odoo.conf --expand project.task -x
 ```
 
-**3. Open Models and Views in Editor** Open all relevant files (including views) in your
-editor:
+**3. "Prune Large Methods"** Keep `project.task` expanded but remove a specific large
+method:
 
 ```console
-akaidoo project -c odoo.conf --include view -e
+akaidoo sale_timesheet --expand project.task --prune-methods project.task.large_method -x
 ```
 
-**4. "High-Level Architecture"** See the data model and API surface of `account` without
-implementation details:
+**4. "Max Shrink" (Data Model Only)** Get an ultra-compact summary of the data
+structure, perfect for understanding relationships:
 
 ```console
-akaidoo account -c odoo.conf --shrink hard -x
+akaidoo account -c odoo.conf --shrink extreme -x
 ```
 
 **5. Migration Context** Gather code + migration scripts for an upgrade:
@@ -181,4 +207,4 @@ Contributions are welcome! Please open an issue or submit a PR on GitHub.
 
 ## License
 
-MIT License.
+MIT
