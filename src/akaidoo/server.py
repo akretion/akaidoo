@@ -1,8 +1,19 @@
 from typing import List, Optional
 from pathlib import Path
 from fastmcp import FastMCP
-from .cli import resolve_akaidoo_context, get_akaidoo_context_dump
+from .cli import (
+    resolve_akaidoo_context,
+    get_akaidoo_context_dump,
+    _build_rlm_payload,
+    RLM_WORKER_PROMPT,
+)
 from .tree import get_akaidoo_tree_string
+import os
+
+try:
+    from rlm import RLM
+except ImportError:
+    RLM = None  # Handle optional dependency gracefully if needed, or fail later
 
 # Create an MCP server
 mcp = FastMCP("Akaidoo")
@@ -52,6 +63,53 @@ def read_source_code(
     )
     introduction = f"MCP Dump for {addon}"
     return get_akaidoo_context_dump(context, introduction)
+
+
+@mcp.tool()
+def ask_codebase(addon: str, question: str) -> str:
+    """
+    An AI Research Assistant with the entire '{addon}' module loaded in RAM.
+
+    **GUIDELINES FOR THE SUPERVISOR:**
+    1. **DO NOT** provide code snippets in the `question`. I already have them.
+    2. **DO** ask for specific logic traces (e.g., "Find where `action_confirm` is called in `sale.order`").
+    3. **DO** ask for architectural validation (e.g., "Check if `_compute_tax` depends on `amount_total`").
+
+    **HOW IT WORKS:**
+    I use a "Skeleton-First" search strategy to navigate millions of tokens of code efficiently using a REPL.
+    """
+    if RLM is None:
+        return "Error: 'rlm' package is not installed. Install with 'pip install akaidoo[mcp]'."
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return "Error: GEMINI_API_KEY not found in environment."
+
+    try:
+        rlm = RLM(
+            backend="gemini",
+            backend_kwargs={"model_name": "gemini-2.5-flash", "api_key": api_key},
+            environment="local",  # Runs in the MCP process
+            verbose=True,  # Helpful for debugging logs
+            custom_system_prompt=RLM_WORKER_PROMPT,
+        )
+    except Exception as e:
+        return f"Error initializing RLM: {e}"
+
+    try:
+        try:
+            payload = _build_rlm_payload(addon)
+        except (ValueError, SystemExit):
+            return f"Error: Addon '{addon}' not found in path. Please check the name."
+
+        result = rlm.completion(
+            prompt=payload,
+            root_prompt=f"Investigate this query for module '{addon}': {question}",
+        )
+
+        return result.response
+    except Exception as e:
+        return f"Error executing RLM agent: {e}"
 
 
 @mcp.tool()

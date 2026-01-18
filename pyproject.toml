@@ -7,7 +7,7 @@ name = "akaidoo"
 dynamic = ["version"]
 description = "List files from Odoo addon dependencies using manifestoo."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -15,7 +15,6 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
     "License :: OSI Approved :: MIT License", # Match the license field
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -54,6 +53,8 @@ test = [
 mcp = [
     "mcp",
     "fastmcp",
+    "rlm",
+    "google-genai",
 ]
 
 [tool.setuptools.dynamic]
