@@ -1567,7 +1567,12 @@ def get_akaidoo_context_dump(
                 header_path = fp.resolve().relative_to(Path.cwd())
             except ValueError:
                 header_path = fp.resolve()
-            header = f"# FILEPATH: {header_path}\n"
+
+            suffix = context.shrunken_files_info.get(fp.resolve(), {}).get(
+                "header_suffix", ""
+            )
+            header = f"# FILEPATH: {header_path}{suffix}\n"
+
             content = context.shrunken_files_content.get(
                 fp.resolve(),
                 re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),

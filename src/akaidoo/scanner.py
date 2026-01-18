@@ -324,25 +324,32 @@ def scan_addon_files(
                             )
                             shrink_level = matrix_row.get(category, "soft")
 
-                            if shrink_level != "none":
-                                shrunken_content, actually_expanded = (
-                                    shrink_python_file(
-                                        str(found_file),
-                                        shrink_level=shrink_level,
-                                        expand_models=expand_models_set,
-                                        skip_imports=(shrink_mode != "none"),
-                                        strip_metadata=(
-                                            shrink_level in ("hard", "extreme")
-                                        ),
-                                        relevant_models=relevant_models,
-                                        prune_methods=prune_methods,
-                                    )
+                            # Always run shrinker to support context headers/navigation
+                            try:
+                                header_path = abs_file_path.relative_to(Path.cwd())
+                            except ValueError:
+                                header_path = abs_file_path
+
+                            shrunken_content, actually_expanded, first_suffix = (
+                                shrink_python_file(
+                                    str(found_file),
+                                    shrink_level=shrink_level,
+                                    expand_models=expand_models_set,
+                                    skip_imports=(shrink_mode != "none"),
+                                    strip_metadata=(
+                                        shrink_level in ("hard", "extreme")
+                                    ),
+                                    relevant_models=relevant_models,
+                                    prune_methods=prune_methods,
+                                    header_path=str(header_path),
                                 )
-                                shrunken_files_content[abs_file_path] = shrunken_content
-                                shrunken_files_info[abs_file_path] = {
-                                    "shrink_level": shrink_level,
-                                    "expanded_models": actually_expanded,
-                                }
+                            )
+                            shrunken_files_content[abs_file_path] = shrunken_content
+                            shrunken_files_info[abs_file_path] = {
+                                "shrink_level": shrink_level,
+                                "expanded_models": actually_expanded,
+                                "header_suffix": first_suffix or "",
+                            }
                     found_files.append(abs_file_path)
 
     return found_files
