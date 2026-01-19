@@ -24,6 +24,7 @@ from .config import (
 from .context import (
     resolve_akaidoo_context,
     get_akaidoo_context_dump,
+    _calculate_expanded_files_size,
 )
 
 try:
@@ -42,6 +43,43 @@ except metadata.PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
 TOKEN_ESTIMATION_FACTOR = TOKEN_FACTOR  # Alias for backward compatibility
+
+
+def parse_context_budget(budget_str: Optional[str]) -> Optional[int]:
+    """
+    Parse a context budget string into character count.
+
+    Supports formats:
+    - "100k" or "100K" -> 100,000 tokens -> ~370,000 chars (using TOKEN_FACTOR)
+    - "50000" -> 50,000 characters
+
+    Returns character count or None if no budget specified.
+    """
+    if not budget_str:
+        return None
+
+    budget_str = budget_str.strip().lower()
+
+    if budget_str.endswith("k"):
+        # Token count (e.g., "100k" = 100,000 tokens)
+        try:
+            tokens = int(budget_str[:-1]) * 1000
+            # Convert tokens to chars: chars = tokens / TOKEN_FACTOR
+            return int(tokens / TOKEN_FACTOR)
+        except ValueError:
+            echo.error(
+                f"Invalid budget format: {budget_str}. Use '100k' for tokens or '50000' for chars."
+            )
+            raise typer.Exit(1)
+    else:
+        # Character count
+        try:
+            return int(budget_str)
+        except ValueError:
+            echo.error(
+                f"Invalid budget format: {budget_str}. Use '100k' for tokens or '50000' for chars."
+            )
+            raise typer.Exit(1)
 
 
 def version_callback_for_run(value: bool):
@@ -478,6 +516,13 @@ def akaidoo_command_entrypoint(
         help="Activate Agent Mode: separate background context and provide source reading instructions.",
         show_default=False,
     ),
+    context_budget: Optional[str] = typer.Option(
+        None,
+        "--context-budget",
+        "-B",
+        help="Target context size budget (e.g., '100k' for 100k tokens, '50000' for 50000 chars). Akaidoo will auto-escalate shrink/prune modes to fit.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
@@ -487,6 +532,13 @@ def akaidoo_command_entrypoint(
     if agent_mode:
         if not output_file:
             output_file = Path(".akaidoo/context/background.md")
+
+    # When using --context-budget, default to output file if no output mode specified
+    if context_budget and not output_file and not clipboard and not edit_in_editor:
+        output_file = Path(".akaidoo/context/current.md")
+
+    # Parse context budget
+    budget_chars = parse_context_budget(context_budget)
 
     context = resolve_akaidoo_context(
         addon_name=addon_name,
@@ -510,6 +562,7 @@ def akaidoo_command_entrypoint(
         prune_mode=prune_mode,
         prune_methods_str=prune_methods_str,
         skip_expanded=agent_mode,
+        context_budget=budget_chars,
     )
 
     edit_mode = edit_in_editor
@@ -584,6 +637,11 @@ Conventions:
                         model_chars_map[m] = model_chars_map.get(m, 0) + file_size
             except Exception:
                 pass
+
+    # In agent mode, add the size of expanded files that LLM will read separately
+    if agent_mode:
+        expanded_chars = _calculate_expanded_files_size(context)
+        total_chars += expanded_chars
 
     total_kb = total_chars / 1024
     total_tokens = int(total_chars * TOKEN_ESTIMATION_FACTOR / 1000)
@@ -693,6 +751,7 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
     if output_file or clipboard:
         dump = get_akaidoo_context_dump(context, introduction)
         if output_file:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(dump, encoding="utf-8")
             typer.echo(
                 typer.style(f"Codebase dump written to {output_file}", bold=True)

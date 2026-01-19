@@ -3,6 +3,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from .context import resolve_akaidoo_context, get_akaidoo_context_dump
 from .tree import get_akaidoo_tree_string
+from .config import TOKEN_FACTOR
 
 # Create an MCP server
 mcp = FastMCP("Akaidoo")
@@ -33,6 +34,7 @@ def read_source_code(
     addon: str,
     focus_models: Optional[List[str]] = None,
     expand_models: Optional[List[str]] = None,
+    context_budget_tokens: Optional[int] = None,
 ) -> str:
     """
     Retrieves Odoo source code. Use this AFTER looking at the map.
@@ -44,11 +46,19 @@ def read_source_code(
        This isolates the specific logic causing the crash while shrinking everything else.
     3. **Targeted Expansion:** If you need to see the full definition of a related model,
        pass `expand_models=['the.model.name']` to see its complete source across the dependency tree.
+    4. **Budget Control:** Pass `context_budget_tokens` (e.g., 100000) to limit context size.
+       Akaidoo will auto-escalate shrink/prune modes to fit within the budget.
     """
+    # Convert token budget to character budget
+    budget_chars = None
+    if context_budget_tokens is not None:
+        budget_chars = int(context_budget_tokens / TOKEN_FACTOR)
+
     context = resolve_akaidoo_context(
         addon_name=addon,
         focus_models_str=",".join(focus_models) if focus_models else None,
         add_expand_str=",".join(expand_models) if expand_models else None,
+        context_budget=budget_chars,
     )
     introduction = f"MCP Dump for {addon}"
     return get_akaidoo_context_dump(context, introduction)
