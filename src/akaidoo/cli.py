@@ -496,6 +496,7 @@ def resolve_akaidoo_context(
     rm_expand_str: Optional[str] = None,
     prune_mode: str = "soft",
     prune_methods_str: Optional[str] = None,
+    skip_expanded: bool = False,
 ) -> AkaidooContext:
     found_files_list: List[Path] = []
     addon_files_map: Dict[str, List[Path]] = {}
@@ -1002,6 +1003,7 @@ def resolve_akaidoo_context(
                 prune_mode=prune_mode,
                 shrunken_files_info=shrunken_files_info,
                 prune_methods=prune_methods_set,
+                skip_expanded=skip_expanded,
             )
             addon_files_map[addon_to_scan_name] = addon_files
 
@@ -1322,11 +1324,21 @@ def akaidoo_command_entrypoint(
         help="Create a session.md file with the context map and command.",
         show_default=False,
     ),
+    agent_mode: bool = typer.Option(
+        False,
+        "--agent",
+        help="Activate Agent Mode: separate background context and provide source reading instructions.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
     )
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
+
+    if agent_mode:
+        if not output_file:
+            output_file = Path(".akaidoo/context/background.md")
 
     context = resolve_akaidoo_context(
         addon_name=addon_name,
@@ -1349,6 +1361,7 @@ def akaidoo_command_entrypoint(
         rm_expand_str=rm_expand_str,
         prune_mode=prune_mode,
         prune_methods_str=prune_methods_str,
+        skip_expanded=agent_mode,
     )
 
     edit_mode = edit_in_editor
@@ -1542,6 +1555,55 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                 typer.echo(typer.style("Codebase dump copied to clipboard.", bold=True))
             else:
                 echo.error("pyperclip not installed. Cannot copy to clipboard.")
+
+    if agent_mode:
+        # Collect all expanded locations
+        all_locations: Dict[str, Dict] = {}
+        for fp, info in context.shrunken_files_info.items():
+            locs = info.get("expanded_locations")
+            if locs:
+                try:
+                    rel_path = fp.relative_to(Path.cwd())
+                except ValueError:
+                    rel_path = fp
+                for model_name, (start, end) in locs.items():
+                    all_locations[model_name] = {
+                        "path": str(rel_path),
+                        "start": start,
+                        "end": end,
+                    }
+
+        if all_locations:
+            typer.echo(
+                "\n"
+                + typer.style(
+                    "--- AGENT INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True
+                )
+            )
+            typer.echo(
+                typer.style(
+                    f"1. Read the background context file entirely: {output_file}",
+                    bold=True,
+                )
+            )
+            typer.echo(
+                typer.style(
+                    "2. Use your 'read_file' tool to read the following expanded models from source:",
+                    bold=True,
+                )
+            )
+
+            # Sort by path then line
+            sorted_locs = sorted(
+                all_locations.items(), key=lambda x: (x[1]["path"], x[1]["start"])
+            )
+
+            for model_name, info in sorted_locs:
+                loc_str = f"   - Model '{model_name}': {info['path']} (lines {info['start']}-{info['end']})"
+                typer.echo(typer.style(loc_str, fg=typer.colors.GREEN))
+            typer.echo(
+                typer.style("--- END INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True)
+            )
 
 
 def get_akaidoo_context_dump(

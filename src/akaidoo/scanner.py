@@ -34,21 +34,21 @@ SHRINK_MATRIX = {
         "T_OTH": "none",
         "D_EXP": "soft",
         "D_REL": "soft",
-        "D_OTH": "soft",
+        "D_OTH": "extreme",
     },
     "medium": {
         "T_EXP": "none",
         "T_OTH": "soft",
         "D_EXP": "soft",
         "D_REL": "hard",
-        "D_OTH": "hard",
+        "D_OTH": "extreme",
     },
     "hard": {
         "T_EXP": "soft",
         "T_OTH": "hard",
         "D_EXP": "hard",
         "D_REL": "hard",
-        "D_OTH": "hard",
+        "D_OTH": "extreme",
     },
     "extreme": {
         "T_EXP": "soft",
@@ -114,6 +114,7 @@ def scan_addon_files(
     prune_mode: str = "soft",
     shrunken_files_info: Optional[Dict[Path, Dict]] = None,
     prune_methods: Optional[Set[str]] = None,
+    skip_expanded: bool = False,
 ) -> List[Path]:
     """Scan an Odoo addon directory for relevant files based on filters."""
     found_files = []
@@ -330,25 +331,28 @@ def scan_addon_files(
                             except ValueError:
                                 header_path = abs_file_path
 
-                            shrunken_content, actually_expanded, first_suffix = (
-                                shrink_python_file(
-                                    str(found_file),
-                                    shrink_level=shrink_level,
-                                    expand_models=expand_models_set,
-                                    skip_imports=(shrink_mode != "none"),
-                                    strip_metadata=(
-                                        shrink_level in ("hard", "extreme")
-                                    ),
-                                    relevant_models=relevant_models,
-                                    prune_methods=prune_methods,
-                                    header_path=str(header_path),
-                                )
+                            (
+                                shrunken_content,
+                                actually_expanded,
+                                first_suffix,
+                                locations,
+                            ) = shrink_python_file(
+                                str(found_file),
+                                shrink_level=shrink_level,
+                                expand_models=expand_models_set,
+                                skip_imports=(shrink_mode != "none"),
+                                strip_metadata=(shrink_level in ("hard", "extreme")),
+                                relevant_models=relevant_models,
+                                prune_methods=prune_methods,
+                                header_path=str(header_path),
+                                skip_expanded_content=skip_expanded,
                             )
                             shrunken_files_content[abs_file_path] = shrunken_content
                             shrunken_files_info[abs_file_path] = {
                                 "shrink_level": shrink_level,
                                 "expanded_models": actually_expanded,
                                 "header_suffix": first_suffix or "",
+                                "expanded_locations": locations,
                             }
                     found_files.append(abs_file_path)
 

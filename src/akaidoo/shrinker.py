@@ -141,24 +141,26 @@ def shrink_python_file(
     relevant_models: Optional[Set[str]] = None,
     prune_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
-) -> Tuple[str, Set[str], Optional[str]]:
+    skip_expanded_content: bool = False,
+) -> Tuple[str, Set[str], Optional[str], Dict[str, Tuple[int, int]]]:
     """
     Shrinks Python code from a file.
-    Returns (shrunken_content, actually_expanded_models, first_header_suffix).
+    Returns (shrunken_content, actually_expanded_models, first_header_suffix, expanded_locations).
     """
     if shrink_level is None:
         shrink_level = "hard" if aggressive else "soft"
 
-    if shrink_level == "none" and not prune_methods:
-        # NOTE: We need to handle headers even in 'none' mode now!
-        # But for now, user didn't ask to change 'none' output (usually raw file).
-        # Wait, if 'none' is used for TARGET addons (which are FULL), we DO want headers?
-        # My plan said "update shrink_python_file to... Return the full string with headers embedded".
-        # If I return raw file here, I skip header logic.
-        # But wait, T_EXP is 'none' in 'soft' mode?
-        # Yes. T_EXP is FULL.
-        # So I MUST process the file even if shrink_level is none, to insert headers!
-        pass
+    # Note: Even if 'none', we might need to parse to get line ranges or apply skip_expanded_content
+    # So we only return early if we don't care about those features?
+    # If skip_expanded_content is True, we MUST parse to find them.
+    # If prune_methods is set, we MUST parse.
+    # If header_path is set (implies we want context navigation), we MUST parse.
+    # So basically always parse unless simple 'none' with no extras.
+    if shrink_level == "none" and not prune_methods and not skip_expanded_content:
+        # But wait, header logic is inside loop. If we skip parsing, we miss headers.
+        # Assuming we always want context headers if header_path is provided.
+        if not header_path:
+            return Path(path).read_text(encoding="utf-8"), set(), None, {}
 
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
@@ -170,6 +172,7 @@ def shrink_python_file(
     relevant_models = relevant_models or set()
     prune_methods = prune_methods or set()
     actually_expanded_models = set()
+    expanded_locations = {}
 
     # Pre-scan for Odoo models count
     odoo_models_count = 0
@@ -180,8 +183,6 @@ def shrink_python_file(
                 m_names = _get_odoo_model_names_from_body(body_node, code_bytes)
                 if m_names:
                     odoo_models_count += 1
-
-    # print(f"DEBUG: {path} models count: {odoo_models_count}", file=sys.stderr)
 
     current_model_index = 0
     first_header_suffix = None
@@ -285,7 +286,18 @@ def shrink_python_file(
                 end_line = node.end_point[0] + 1
                 line_range_str = f" (lines {start_line}-{end_line})"
 
-                # print(f"DEBUG: Expanding {model_names}. Index {current_model_index}/{odoo_models_count}. Range {line_range_str}", file=sys.stderr)
+                # Store location info
+                for m in model_names & expand_models:
+                    expanded_locations[m] = (start_line, end_line)
+
+                if skip_expanded_content:
+                    # Skip content but maybe leave a trace?
+                    # "expanded files are completely skipped" - context of file dump.
+                    # But if file has other models, we want them.
+                    # If we skip this model, we just don't append anything.
+                    # Maybe a tiny comment?
+                    # shrunken_parts.append(f"# Model {', '.join(model_names)} skipped (see CTA)")
+                    continue
 
                 if odoo_models_count > 1:
                     if current_model_index == 1:
@@ -308,6 +320,14 @@ def shrink_python_file(
 
                     start_line = node.start_point[0] + 1
                     end_line = node.end_point[0] + 1
+
+                    # Store location info even if pruned methods (it's still "expanded" category)
+                    for m in model_names & expand_models:
+                        expanded_locations[m] = (start_line, end_line)
+
+                    if skip_expanded_content:
+                        continue
+
                     line_range_str = f" (lines {start_line}-{end_line})"
 
                     if odoo_models_count > 1:
@@ -402,6 +422,7 @@ def shrink_python_file(
         "\n".join(shrunken_parts) + "\n",
         actually_expanded_models,
         first_header_suffix,
+        expanded_locations,
     )
 
 
@@ -439,6 +460,9 @@ def main():
     cli_parser.add_argument(
         "-H", "--header-path", type=str, help="File path for headers."
     )
+    cli_parser.add_argument(
+        "--skip-expanded", action="store_true", help="Skip content of expanded models."
+    )
     cli_parser.add_argument("-o", "--output", type=str)
     args = cli_parser.parse_args()
 
@@ -446,13 +470,14 @@ def main():
     prune_set = set(args.prune_methods.split(",")) if args.prune_methods else set()
 
     try:
-        shrunken_content, _, _ = shrink_python_file(
+        shrunken_content, _, _, _ = shrink_python_file(
             args.input_file,
             aggressive=args.shrink_aggressive,
             shrink_level=args.shrink_level,
             expand_models=expand_set,
             prune_methods=prune_set,
             header_path=args.header_path,
+            skip_expanded_content=args.skip_expanded,
         )
         if args.output:
             Path(args.output).write_text(shrunken_content, encoding="utf-8")

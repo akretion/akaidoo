@@ -125,7 +125,7 @@ different categories of models.
 | Effort Level         | T_EXP | T_OTH | D_EXP | D_REL | D_OTH |
 | :------------------- | :---- | :---- | :---- | :---- | :---- |
 | **`none`**           | FULL  | FULL  | FULL  | FULL  | FULL  |
-| **`soft`** (default) | FULL  | FULL  | SOFT  | SOFT  | SOFT  |
+| **`soft`** (default) | FULL  | FULL  | SOFT  | SOFT  | MAX   |
 | **`medium`**         | FULL  | SOFT  | SOFT  | HARD  | HARD  |
 | **`hard`**           | SOFT  | HARD  | HARD  | HARD  | HARD  |
 | **`extreme`**        | SOFT  | MAX   | MAX   | MAX   | MAX   |
