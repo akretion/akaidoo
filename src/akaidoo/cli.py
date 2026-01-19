@@ -18,14 +18,12 @@ from .utils import (
     get_timestamp,
 )
 from .tree import print_akaidoo_tree, get_akaidoo_tree_string
-from .config import (
-    TOKEN_FACTOR,
-)
+from .config import TOKEN_FACTOR
 from .context import (
     resolve_akaidoo_context,
-    get_akaidoo_context_dump,
     _calculate_expanded_files_size,
 )
+from .service import get_service
 
 try:
     from importlib import metadata
@@ -749,7 +747,8 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         subprocess.run(shlex.split(editor) + [str(f) for f in context.found_files_list])
 
     if output_file or clipboard:
-        dump = get_akaidoo_context_dump(context, introduction)
+        service = get_service()
+        dump = service.get_context_dump(context, introduction)
         if output_file:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(dump, encoding="utf-8")

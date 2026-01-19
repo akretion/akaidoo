@@ -1,12 +1,22 @@
+"""
+Akaidoo MCP Server
+
+Provides MCP (Model Context Protocol) tools for AI agents to query Odoo codebases.
+Uses AkaidooService for all operations.
+"""
+
 from typing import List, Optional
 from pathlib import Path
 from fastmcp import FastMCP
-from .context import resolve_akaidoo_context, get_akaidoo_context_dump
-from .tree import get_akaidoo_tree_string
+
+from .service import get_service
 from .config import TOKEN_FACTOR
 
 # Create an MCP server
 mcp = FastMCP("Akaidoo")
+
+# Get the service instance
+_service = get_service()
 
 
 @mcp.tool()
@@ -15,18 +25,8 @@ def get_context_map(addon: str) -> str:
     Shows the dependency tree and file hints for an addon. ALWAYS call this first to orient yourself.
     It helps you understand module relationships before reading any code.
     """
-    context = resolve_akaidoo_context(addon_name=addon)
-    tree_str = get_akaidoo_tree_string(
-        root_addon_names=context.selected_addon_names,
-        addons_set=context.addons_set,
-        addon_files_map=context.addon_files_map,
-        odoo_series=context.final_odoo_series,
-        excluded_addons=context.excluded_addons,
-        pruned_addons=context.pruned_addons,
-        use_ansi=False,  # Important for machine-readable output
-        shrunken_files_info=context.shrunken_files_info,
-    )
-    return tree_str
+    context = _service.resolve_context(addon)
+    return _service.get_tree_string(context, use_ansi=False)
 
 
 @mcp.tool()
@@ -54,14 +54,26 @@ def read_source_code(
     if context_budget_tokens is not None:
         budget_chars = int(context_budget_tokens / TOKEN_FACTOR)
 
-    context = resolve_akaidoo_context(
-        addon_name=addon,
+    context = _service.resolve_context(
+        addon,
         focus_models_str=",".join(focus_models) if focus_models else None,
         add_expand_str=",".join(expand_models) if expand_models else None,
         context_budget=budget_chars,
     )
     introduction = f"MCP Dump for {addon}"
-    return get_akaidoo_context_dump(context, introduction)
+    return _service.get_context_dump(context, introduction)
+
+
+@mcp.tool()
+def get_context_summary(addon: str) -> dict:
+    """
+    Get a summary of the context for an addon without the full dump.
+
+    Returns key metrics about the context including token estimates,
+    expanded models, and pruned addons.
+    """
+    context = _service.resolve_context(addon)
+    return _service.get_context_summary(context)
 
 
 @mcp.tool()

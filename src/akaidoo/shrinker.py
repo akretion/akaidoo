@@ -6,6 +6,7 @@ import pprint
 from pathlib import Path
 from typing import Optional, Set, List, Dict, Tuple
 from .utils import _get_odoo_model_names_from_body, parser
+from .types import ShrinkResult
 
 
 def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
@@ -142,7 +143,7 @@ def shrink_python_file(
     prune_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
     skip_expanded_content: bool = False,
-) -> Tuple[str, Set[str], Optional[str], Dict[str, List[Tuple[int, int, str]]]]:
+) -> ShrinkResult:
     """
     Shrinks Python code from a file.
     Returns (shrunken_content, actually_expanded_models, first_header_suffix, expanded_locations).
@@ -160,7 +161,7 @@ def shrink_python_file(
         # But wait, header logic is inside loop. If we skip parsing, we miss headers.
         # Assuming we always want context headers if header_path is provided.
         if not header_path:
-            return Path(path).read_text(encoding="utf-8"), set(), None, {}
+            return ShrinkResult(content=Path(path).read_text(encoding="utf-8"))
 
     code = Path(path).read_text(encoding="utf-8")
     code_bytes = bytes(code, "utf8")
@@ -424,11 +425,11 @@ def shrink_python_file(
     while shrunken_parts and shrunken_parts[-1] == "":
         shrunken_parts.pop()
 
-    return (
-        "\n".join(shrunken_parts) + "\n",
-        actually_expanded_models,
-        first_header_suffix,
-        expanded_locations,
+    return ShrinkResult(
+        content="\n".join(shrunken_parts) + "\n",
+        expanded_models=actually_expanded_models,
+        header_suffix=first_header_suffix,
+        expanded_locations=expanded_locations,
     )
 
 
@@ -476,7 +477,7 @@ def main():
     prune_set = set(args.prune_methods.split(",")) if args.prune_methods else set()
 
     try:
-        shrunken_content, _, _, _ = shrink_python_file(
+        result = shrink_python_file(
             args.input_file,
             aggressive=args.shrink_aggressive,
             shrink_level=args.shrink_level,
@@ -486,9 +487,9 @@ def main():
             skip_expanded_content=args.skip_expanded,
         )
         if args.output:
-            Path(args.output).write_text(shrunken_content, encoding="utf-8")
+            Path(args.output).write_text(result.content, encoding="utf-8")
         else:
-            sys.stdout.write(shrunken_content)
+            sys.stdout.write(result.content)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

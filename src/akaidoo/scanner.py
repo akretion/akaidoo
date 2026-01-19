@@ -3,6 +3,7 @@ from typing import List, Set, Optional, Dict
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from .shrinker import shrink_python_file
+from .types import ScanResult
 from .utils import get_file_odoo_models
 from .config import BINARY_EXTS, SHRINK_MATRIX, MAX_DATA_FILE_SIZE
 
@@ -53,23 +54,28 @@ def scan_addon_files(
     excluded_addons: Set[str],
     shrink_mode: str = "none",
     expand_models_set: Optional[Set[str]] = None,
-    shrunken_files_content: Optional[Dict[Path, str]] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_mode: str = "soft",
-    shrunken_files_info: Optional[Dict[Path, Dict]] = None,
     prune_methods: Optional[Set[str]] = None,
     skip_expanded: bool = False,
-) -> List[Path]:
-    """Scan an Odoo addon directory for relevant files based on filters."""
-    found_files = []
-    shrunken_files_content = (
-        shrunken_files_content if shrunken_files_content is not None else {}
-    )
-    shrunken_files_info = shrunken_files_info if shrunken_files_info is not None else {}
-    expand_models_set = expand_models_set if expand_models_set is not None else set()
-    relevant_models = relevant_models if relevant_models is not None else set()
-    excluded_addons = excluded_addons if excluded_addons is not None else set()
-    prune_methods = prune_methods if prune_methods is not None else set()
+) -> ScanResult:
+    """
+    Scan an Odoo addon directory for relevant files based on filters.
+
+    Returns a ScanResult containing:
+    - found_files: List of file paths found
+    - shrunken_content: Dict mapping file paths to their shrunken content
+    - shrunken_info: Dict mapping file paths to shrink metadata
+    """
+    found_files: List[Path] = []
+    shrunken_content: Dict[Path, str] = {}
+    shrunken_info: Dict[Path, Dict] = {}
+
+    # Normalize None to empty sets for simpler conditionals
+    expand_models_set = expand_models_set or set()
+    relevant_models = relevant_models or set()
+    excluded_addons = excluded_addons or set()
+    prune_methods = prune_methods or set()
 
     scan_roots: List[str] = []
     if "model" in includes:
@@ -115,7 +121,7 @@ def scan_addon_files(
             current_addon_extensions.append(".js")
 
     if not current_addon_extensions:
-        return []
+        return ScanResult()
 
     for root_name in set(scan_roots):
         scan_path_dir = addon_dir / root_name if root_name != "." else addon_dir
@@ -211,8 +217,8 @@ def scan_addon_files(
                                 content = found_file.read_text(encoding="utf-8")[
                                     :MAX_DATA_FILE_SIZE
                                 ]
-                                content += f"\n\n# ... truncated by akaidoo (size > {MAX_DATA_FILE_SIZE/1024}KB) ..."
-                                shrunken_files_content[abs_file_path] = content
+                                content += f"\n\n# ... truncated by akaidoo (size > {MAX_DATA_FILE_SIZE / 1024}KB) ..."
+                                shrunken_content[abs_file_path] = content
                         except Exception:
                             pass
 
@@ -275,12 +281,7 @@ def scan_addon_files(
                             except ValueError:
                                 header_path = abs_file_path
 
-                            (
-                                shrunken_content,
-                                actually_expanded,
-                                first_suffix,
-                                locations,
-                            ) = shrink_python_file(
+                            shrink_result = shrink_python_file(
                                 str(found_file),
                                 shrink_level=shrink_level,
                                 expand_models=expand_models_set,
@@ -291,13 +292,17 @@ def scan_addon_files(
                                 header_path=str(header_path),
                                 skip_expanded_content=skip_expanded,
                             )
-                            shrunken_files_content[abs_file_path] = shrunken_content
-                            shrunken_files_info[abs_file_path] = {
+                            shrunken_content[abs_file_path] = shrink_result.content
+                            shrunken_info[abs_file_path] = {
                                 "shrink_level": shrink_level,
-                                "expanded_models": actually_expanded,
-                                "header_suffix": first_suffix or "",
-                                "expanded_locations": locations,
+                                "expanded_models": shrink_result.expanded_models,
+                                "header_suffix": shrink_result.header_suffix or "",
+                                "expanded_locations": shrink_result.expanded_locations,
                             }
                     found_files.append(abs_file_path)
 
-    return found_files
+    return ScanResult(
+        found_files=found_files,
+        shrunken_content=shrunken_content,
+        shrunken_info=shrunken_info,
+    )
