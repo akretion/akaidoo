@@ -4,7 +4,7 @@ import argparse
 import ast
 import pprint
 from pathlib import Path
-from typing import Optional, Set, Dict, Tuple
+from typing import Optional, Set, List, Dict, Tuple
 from .utils import _get_odoo_model_names_from_body, parser
 
 
@@ -142,7 +142,7 @@ def shrink_python_file(
     prune_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
     skip_expanded_content: bool = False,
-) -> Tuple[str, Set[str], Optional[str], Dict[str, Tuple[int, int]]]:
+) -> Tuple[str, Set[str], Optional[str], Dict[str, List[Tuple[int, int, str]]]]:
     """
     Shrinks Python code from a file.
     Returns (shrunken_content, actually_expanded_models, first_header_suffix, expanded_locations).
@@ -172,7 +172,7 @@ def shrink_python_file(
     relevant_models = relevant_models or set()
     prune_methods = prune_methods or set()
     actually_expanded_models = set()
-    expanded_locations = {}
+    expanded_locations: Dict[str, List[Tuple[int, int, str]]] = {}
 
     # Pre-scan for Odoo models count
     odoo_models_count = 0
@@ -180,8 +180,8 @@ def shrink_python_file(
         if node.type == "class_definition":
             body_node = node.child_by_field_name("body")
             if body_node:
-                m_names = _get_odoo_model_names_from_body(body_node, code_bytes)
-                if m_names:
+                m_map = _get_odoo_model_names_from_body(body_node, code_bytes)
+                if m_map:
                     odoo_models_count += 1
 
     current_model_index = 0
@@ -264,7 +264,8 @@ def shrink_python_file(
             if not body_node:
                 continue
 
-            model_names = _get_odoo_model_names_from_body(body_node, code_bytes)
+            model_map = _get_odoo_model_names_from_body(body_node, code_bytes)
+            model_names = set(model_map.keys())
             if model_names:
                 current_model_index += 1
 
@@ -288,15 +289,12 @@ def shrink_python_file(
 
                 # Store location info
                 for m in model_names & expand_models:
-                    expanded_locations[m] = (start_line, end_line)
+                    if m not in expanded_locations:
+                        expanded_locations[m] = []
+                    type_ = model_map[m]
+                    expanded_locations[m].append((start_line, end_line, type_))
 
                 if skip_expanded_content:
-                    # Skip content but maybe leave a trace?
-                    # "expanded files are completely skipped" - context of file dump.
-                    # But if file has other models, we want them.
-                    # If we skip this model, we just don't append anything.
-                    # Maybe a tiny comment?
-                    # shrunken_parts.append(f"# Model {', '.join(model_names)} skipped (see CTA)")
                     continue
 
                 if odoo_models_count > 1:
@@ -314,92 +312,100 @@ def shrink_python_file(
                 shrunken_parts.append(class_full_text)
             else:
                 effective_level = shrink_level
+
+                start_line = node.start_point[0] + 1
+                end_line = node.end_point[0] + 1
+                line_range_str = f" (lines {start_line}-{end_line})"
+
+                if odoo_models_count > 1:
+                    if current_model_index == 1:
+                        first_header_suffix = line_range_str
+                    elif header_path:
+                        shrunken_parts.append("")
+                        shrunken_parts.append(
+                            f"# FILEPATH: {header_path}{line_range_str}"
+                        )
+
                 if should_expand:
                     effective_level = "none"
                     actually_expanded_models.update(model_names & expand_models)
 
-                    start_line = node.start_point[0] + 1
-                    end_line = node.end_point[0] + 1
-
                     # Store location info even if pruned methods (it's still "expanded" category)
                     for m in model_names & expand_models:
-                        expanded_locations[m] = (start_line, end_line)
+                        if m not in expanded_locations:
+                            expanded_locations[m] = []
+                        type_ = model_map[m]
+                        expanded_locations[m].append((start_line, end_line, type_))
 
                     if skip_expanded_content:
                         continue
 
-                    line_range_str = f" (lines {start_line}-{end_line})"
+                if effective_level == "none":
+                    class_full_text = code_bytes[
+                        node.start_byte : node.end_byte
+                    ].decode("utf-8")
+                    shrunken_parts.append(class_full_text)
+                else:
+                    header_end = body_node.start_byte
+                    class_header = (
+                        code_bytes[node.start_byte : header_end].decode("utf8").strip()
+                    )
+                    shrunken_parts.append(class_header)
 
-                    if odoo_models_count > 1:
-                        if current_model_index == 1:
-                            first_header_suffix = line_range_str
-                        elif header_path:
-                            shrunken_parts.append("")
-                            shrunken_parts.append(
-                                f"# FILEPATH: {header_path}{line_range_str}"
-                            )
+                    non_computed_fields = []
+                    computed_fields = []
 
-                header_end = body_node.start_byte
-                class_header = (
-                    code_bytes[node.start_byte : header_end].decode("utf8").strip()
-                )
-                shrunken_parts.append(class_header)
+                    for child in body_node.children:
+                        if child.type == "expression_statement":
+                            expr = child.child(0)
+                            if expr and expr.type == "assignment":
+                                f_info = _get_field_info(child, code_bytes)
+                                if f_info["is_field"] and effective_level == "extreme":
+                                    if f_info["compute"]:
+                                        f_label = (
+                                            f"{f_info['name']} ({f_info['compute']})"
+                                        )
+                                        computed_fields.append(f_label)
+                                    else:
+                                        non_computed_fields.append(f_info["name"])
 
-                non_computed_fields = []
-                computed_fields = []
-
-                for child in body_node.children:
-                    if child.type == "expression_statement":
-                        expr = child.child(0)
-                        if expr and expr.type == "assignment":
-                            if effective_level == "none":
-                                line_bytes = code_bytes[
-                                    child.start_byte : child.end_byte
-                                ]
-                                line_text = line_bytes.decode("utf8").strip()
-                                shrunken_parts.append(f"    {line_text}")
-                                continue
-
-                            f_info = _get_field_info(child, code_bytes)
-                            if f_info["is_field"] and effective_level == "extreme":
-                                if f_info["compute"]:
-                                    f_label = f"{f_info['name']} ({f_info['compute']})"
-                                    computed_fields.append(f_label)
+                                    if f_info["comodel"] in relevant_models:
+                                        line_bytes = code_bytes[
+                                            child.start_byte : child.end_byte
+                                        ]
+                                        line_text = line_bytes.decode("utf8").strip()
+                                        shrunken_parts.append(
+                                            f"    {_strip_field_metadata(line_text)}"
+                                        )
                                 else:
-                                    non_computed_fields.append(f_info["name"])
-
-                                if f_info["comodel"] in relevant_models:
                                     line_bytes = code_bytes[
                                         child.start_byte : child.end_byte
                                     ]
                                     line_text = line_bytes.decode("utf8").strip()
                                     shrunken_parts.append(
-                                        f"    {_strip_field_metadata(line_text)}"
+                                        f"    {clean_line(line_text)}"
                                     )
-                            else:
-                                line_bytes = code_bytes[
-                                    child.start_byte : child.end_byte
-                                ]
-                                line_text = line_bytes.decode("utf8").strip()
-                                shrunken_parts.append(f"    {clean_line(line_text)}")
 
-                    elif child.type in ("function_definition", "decorated_definition"):
-                        process_function(
-                            child,
-                            indent="    ",
-                            context_models=model_names,
-                            override_level=effective_level,
-                        )
+                        elif child.type in (
+                            "function_definition",
+                            "decorated_definition",
+                        ):
+                            process_function(
+                                child,
+                                indent="    ",
+                                context_models=model_names,
+                                override_level=effective_level,
+                            )
 
-                if effective_level == "extreme":
-                    if non_computed_fields:
-                        shrunken_parts.append(
-                            f"    # Shrunk non computed fields: {', '.join(non_computed_fields)}"
-                        )
-                    if computed_fields:
-                        shrunken_parts.append(
-                            f"    # Shrunk computed_fields: {', '.join(computed_fields)}"
-                        )
+                    if effective_level == "extreme":
+                        if non_computed_fields:
+                            shrunken_parts.append(
+                                f"    # Shrunk non computed fields: {', '.join(non_computed_fields)}"
+                            )
+                        if computed_fields:
+                            shrunken_parts.append(
+                                f"    # Shrunk computed_fields: {', '.join(computed_fields)}"
+                            )
 
             shrunken_parts.append("")
 

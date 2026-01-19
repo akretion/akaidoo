@@ -199,7 +199,7 @@ class AkaidooNode:
                                 _append(sep, nl=False, dim=True)
                             _append("]", nl=False, dim=True)
 
-                    if is_shrunk:
+                    if is_shrunk and shrink_level != "none":
                         if shrink_level == "extreme":
                             tag = " [shrunk (max)]"
                         elif shrink_level == "hard" or is_aggressive:

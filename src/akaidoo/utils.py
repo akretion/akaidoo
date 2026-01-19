@@ -11,11 +11,14 @@ parser.language = Language(python_language())
 AUTO_EXPAND_THRESHOLD = 7
 
 
-def _get_odoo_model_names_from_body(body_node, code_bytes: bytes) -> Set[str]:
+def _get_odoo_model_names_from_body(body_node, code_bytes: bytes) -> Dict[str, str]:
     """
-    Scans a class body for an assignment to _name or _inherit and returns a set of model names.
+    Scans a class body for _name and _inherit to determine model names and their type.
+    Returns a dict {model_name: 'Base'|'Ext'}.
     """
-    models = set()
+    name = None
+    inherits = []
+
     for child in body_node.children:
         if child.type == "expression_statement":
             assign = child.child(0)
@@ -25,21 +28,42 @@ def _get_odoo_model_names_from_body(body_node, code_bytes: bytes) -> Set[str]:
                     var_name = code_bytes[left.start_byte : left.end_byte].decode(
                         "utf-8"
                     )
-                    if var_name in ("_name", "_inherit"):
-                        right = assign.child_by_field_name("right")
-                        if right:
-                            if right.type == "string":
-                                val = code_bytes[
-                                    right.start_byte : right.end_byte
-                                ].decode("utf-8")
-                                models.add(val.strip("'\""))
-                            elif right.type == "list":
-                                for element in right.children:
-                                    if element.type == "string":
-                                        val = code_bytes[
-                                            element.start_byte : element.end_byte
-                                        ].decode("utf-8")
-                                        models.add(val.strip("'\""))
+                    right = assign.child_by_field_name("right")
+                    if not right:
+                        continue
+
+                    if var_name == "_name":
+                        if right.type == "string":
+                            val = code_bytes[right.start_byte : right.end_byte].decode(
+                                "utf-8"
+                            )
+                            name = val.strip("'\"")
+                    elif var_name == "_inherit":
+                        if right.type == "string":
+                            val = code_bytes[right.start_byte : right.end_byte].decode(
+                                "utf-8"
+                            )
+                            inherits.append(val.strip("'\""))
+                        elif right.type == "list":
+                            for element in right.children:
+                                if element.type == "string":
+                                    val = code_bytes[
+                                        element.start_byte : element.end_byte
+                                    ].decode("utf-8")
+                                    inherits.append(val.strip("'\""))
+
+    models = {}
+    if name:
+        # If _name is present, it's Base unless it's also in _inherit (extension pattern)
+        if name in inherits:
+            models[name] = "Ext"
+        else:
+            models[name] = "Base"
+    elif inherits:
+        # No _name, only _inherit: it's an extension of all inherited models
+        for i in inherits:
+            models[i] = "Ext"
+
     return models
 
 
@@ -59,8 +83,9 @@ def get_odoo_model_stats(code: str) -> Dict[str, Dict[str, int]]:
         if node.type == "class_definition":
             body = node.child_by_field_name("body")
             if body:
-                model_names = _get_odoo_model_names_from_body(body, code_bytes)
-                if model_names:
+                model_map = _get_odoo_model_names_from_body(body, code_bytes)
+                if model_map:
+                    model_names = set(model_map.keys())
                     fields_count = 0
                     methods_count = 0
 

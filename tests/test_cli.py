@@ -1232,7 +1232,7 @@ def test_tree_view_shrunk_visualization(dummy_addons_env):
 
     for line in result.stdout.splitlines():
         if "b_model.py" in line:
-            if "[shrunk]" in line:
+            if "[shrunk (max)]" in line:
                 found_b_shrunk = True
         if "a_model.py" in line:
             if "[shrunk]" in line:

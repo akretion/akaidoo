@@ -126,8 +126,8 @@ different categories of models.
 | :------------------- | :---- | :---- | :---- | :---- | :---- |
 | **`none`**           | FULL  | FULL  | FULL  | FULL  | FULL  |
 | **`soft`** (default) | FULL  | FULL  | SOFT  | SOFT  | MAX   |
-| **`medium`**         | FULL  | SOFT  | SOFT  | HARD  | HARD  |
-| **`hard`**           | SOFT  | HARD  | HARD  | HARD  | HARD  |
+| **`medium`**         | FULL  | SOFT  | SOFT  | HARD  | MAX   |
+| **`hard`**           | SOFT  | HARD  | HARD  | HARD  | MAX   |
 | **`extreme`**        | SOFT  | MAX   | MAX   | MAX   | MAX   |
 
 ### Fine-Grained Controls

@@ -1557,8 +1557,7 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                 echo.error("pyperclip not installed. Cannot copy to clipboard.")
 
     if agent_mode:
-        # Collect all expanded locations
-        all_locations: Dict[str, Dict] = {}
+        locations_by_model = {}
         for fp, info in context.shrunken_files_info.items():
             locs = info.get("expanded_locations")
             if locs:
@@ -1566,43 +1565,68 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                     rel_path = fp.relative_to(Path.cwd())
                 except ValueError:
                     rel_path = fp
-                for model_name, (start, end) in locs.items():
-                    all_locations[model_name] = {
-                        "path": str(rel_path),
-                        "start": start,
-                        "end": end,
-                    }
+                for model_name, ranges in locs.items():
+                    if model_name not in locations_by_model:
+                        locations_by_model[model_name] = []
+                    for start, end, type_ in ranges:
+                        locations_by_model[model_name].append(
+                            {
+                                "path": str(rel_path),
+                                "start": start,
+                                "end": end,
+                                "type": type_,
+                            }
+                        )
 
-        if all_locations:
+        if locations_by_model:
             typer.echo(
                 "\n"
                 + typer.style(
-                    "--- AGENT INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True
-                )
-            )
-            typer.echo(
-                typer.style(
-                    f"1. Read the background context file entirely: {output_file}",
+                    "--- AGENT INSTRUCTIONS (CONTEXT INGESTION) ---",
+                    fg=typer.colors.CYAN,
                     bold=True,
                 )
             )
             typer.echo(
                 typer.style(
-                    "2. Use your 'read_file' tool to read the following expanded models from source:",
+                    f"1. Use your 'read_file' tool to read this map of summarized secondary models file ENTIRELY: {output_file}",
+                    bold=True,
+                )
+            )
+            typer.echo(
+                typer.style(
+                    "2. Use your 'read_file' tool to read in parallel the following relevant models from their Path at the proper lines Range:",
                     bold=True,
                 )
             )
 
-            # Sort by path then line
-            sorted_locs = sorted(
-                all_locations.items(), key=lambda x: (x[1]["path"], x[1]["start"])
-            )
+            for m in sorted(locations_by_model.keys()):
+                entries = locations_by_model[m]
+                # Sort: Base first, then by path
+                entries.sort(
+                    key=lambda x: (
+                        0 if x["type"] == "Base" else 1,
+                        x["path"],
+                        x["start"],
+                    )
+                )
 
-            for model_name, info in sorted_locs:
-                loc_str = f"   - Model '{model_name}': {info['path']} (lines {info['start']}-{info['end']})"
-                typer.echo(typer.style(loc_str, fg=typer.colors.GREEN))
+                typer.echo(typer.style(f"\n## Model: {m}", bold=True))
+                typer.echo("| Type | Path | Range |")
+                typer.echo("| :--- | :--- | :--- |")
+
+                for entry in entries:
+                    start = entry["start"]
+                    if start < 20:
+                        start = 1
+                    typer.echo(
+                        f"| {entry['type']} | {entry['path']} | {start}-{entry['end']} |"
+                    )
+
             typer.echo(
-                typer.style("--- END INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True)
+                typer.style(
+                    "\n--- END INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True
+                )
             )
 
 
