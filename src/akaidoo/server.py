@@ -1,7 +1,7 @@
 from typing import List, Optional
 from pathlib import Path
 from fastmcp import FastMCP
-from .cli import resolve_akaidoo_context, get_akaidoo_context_dump
+from .context import resolve_akaidoo_context, get_akaidoo_context_dump
 from .tree import get_akaidoo_tree_string
 
 # Create an MCP server

@@ -8,8 +8,6 @@ from tree_sitter_python import language as python_language
 parser = Parser()
 parser.language = Language(python_language())
 
-AUTO_EXPAND_THRESHOLD = 7
-
 
 def _get_odoo_model_names_from_body(body_node, code_bytes: bytes) -> Dict[str, str]:
     """

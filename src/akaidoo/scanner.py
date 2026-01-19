@@ -4,60 +4,7 @@ from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
 from .shrinker import shrink_python_file
 from .utils import get_file_odoo_models
-
-
-BINARY_EXTS = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".ico",
-    ".svg",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".eot",
-    ".pdf",
-    ".map",
-)
-
-SHRINK_MATRIX = {
-    "none": {
-        "T_EXP": "none",
-        "T_OTH": "none",
-        "D_EXP": "none",
-        "D_REL": "none",
-        "D_OTH": "none",
-    },
-    "soft": {
-        "T_EXP": "none",
-        "T_OTH": "none",
-        "D_EXP": "soft",
-        "D_REL": "soft",
-        "D_OTH": "extreme",
-    },
-    "medium": {
-        "T_EXP": "none",
-        "T_OTH": "soft",
-        "D_EXP": "soft",
-        "D_REL": "hard",
-        "D_OTH": "extreme",
-    },
-    "hard": {
-        "T_EXP": "soft",
-        "T_OTH": "hard",
-        "D_EXP": "hard",
-        "D_REL": "hard",
-        "D_OTH": "extreme",
-    },
-    "extreme": {
-        "T_EXP": "soft",
-        "T_OTH": "extreme",
-        "D_EXP": "extreme",
-        "D_REL": "extreme",
-        "D_OTH": "extreme",
-    },
-}
+from .config import BINARY_EXTS, SHRINK_MATRIX, MAX_DATA_FILE_SIZE
 
 
 def is_trivial_init_py(file_path: Path) -> bool:
@@ -96,9 +43,6 @@ def scan_directory_files(directory_path: Path) -> List[Path]:
 
         found_files.append(item)
     return found_files
-
-
-MAX_DATA_FILE_SIZE = 20 * 1024
 
 
 def scan_addon_files(
