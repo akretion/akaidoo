@@ -135,22 +135,22 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "medium": {
         "T_EXP": "none",
         "T_OTH": "soft",
-        "D_EXP": "soft",
+        "D_EXP": "none",
         "D_REL": "max",  # Related models → max shrink (keep skeleton)
         "D_OTH": "prune",  # Other models → skip entirely
     },
     "hard": {
         "T_EXP": "none",
         "T_OTH": "soft",
-        "D_EXP": "hard",
-        "D_REL": "prune",
+        "D_EXP": "soft",
+        "D_REL": "max",
         "D_OTH": "prune",
     },
     "max": {
-        "T_EXP": "soft",
-        "T_OTH": "max",
+        "T_EXP": "none",
+        "T_OTH": "soft",
         "D_EXP": "max",
-        "D_REL": "prune",
+        "D_REL": "max",
         "D_OTH": "prune",
     },
 }

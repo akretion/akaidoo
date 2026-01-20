@@ -267,7 +267,9 @@ def shrink_python_file(
                 stripped_line = line.strip()
                 if stripped_line:
                     shrunken_parts.append(f"{indent}{stripped_line}")
-            shrunken_parts.append(f"{indent}    pass  # shrunk")
+            start = node.start_point[0] + 1
+            end = node.end_point[0] + 1
+            shrunken_parts.append(f"{indent}    pass  # shrunk (lines {start}-{end})")
             return
 
         full_text = code_bytes[node.start_byte : node.end_byte].decode("utf-8")
@@ -303,7 +305,11 @@ def shrink_python_file(
                 if has_pruned_methods:
                     break
 
-            if should_expand and not has_pruned_methods:
+            if (
+                should_expand
+                and not has_pruned_methods
+                and expanded_shrink_level == "none"
+            ):
                 actually_expanded_models.update(model_names & expand_models)
 
                 start_line = node.start_point[0] + 1
@@ -352,7 +358,7 @@ def shrink_python_file(
                         )
 
                 if should_expand:
-                    effective_level = "none"
+                    effective_level = expanded_shrink_level
                     actually_expanded_models.update(model_names & expand_models)
 
                     # Store location info even if pruned methods (it's still "expanded" category)
@@ -361,7 +367,7 @@ def shrink_python_file(
                             expanded_locations[m] = []
                         type_ = model_map[m]
                         expanded_locations[m].append((start_line, end_line, type_))
-                        model_shrink_levels[m] = "none"  # Expanded = full content
+                        model_shrink_levels[m] = expanded_shrink_level
 
                     if skip_expanded_content:
                         any_content_skipped = True
