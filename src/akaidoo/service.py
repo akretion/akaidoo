@@ -116,7 +116,7 @@ class AkaidooService:
             include: Content types to include (view, wizard, data, etc.)
             exclude_addons_str: Addons to exclude
             no_exclude_addons_str: Addons to force include
-            shrink_mode: none, soft, medium, hard, extreme
+            shrink_mode: none, soft, medium, hard, max
             prune_mode: none, soft, medium, hard
             prune_methods_str: Methods to prune (e.g., "Model.method")
             expand_models_str: Models to fully expand

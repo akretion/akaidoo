@@ -11,7 +11,7 @@ TOKEN_FACTOR = 0.27  # Empirical factor to estimate tokens from character count
 
 # --- Mode Definitions ---
 PRUNE_MODES: List[str] = ["none", "soft", "medium", "hard"]
-SHRINK_MODES: List[str] = ["none", "soft", "medium", "hard", "extreme"]
+SHRINK_MODES: List[str] = ["none", "soft", "medium", "hard", "max"]
 
 # --- Framework Addons ---
 # These addons are excluded by default as they are part of the Odoo framework
@@ -101,7 +101,7 @@ BUDGET_ESCALATION_LEVELS: List[Tuple[str, str]] = [
     ("medium", "medium"),  # Level 2: Increase prune
     ("hard", "medium"),  # Level 3: Hard shrink
     ("hard", "hard"),  # Level 4: Hard prune (target addons only)
-    ("extreme", "hard"),  # Level 5: Maximum shrink
+    ("max", "hard"),  # Level 5: Maximum shrink
 ]
 
 # --- Shrink Matrix ---
@@ -116,7 +116,7 @@ BUDGET_ESCALATION_LEVELS: List[Tuple[str, str]] = [
 #   D_REL: Dependency addon, Related model
 #   D_OTH: Dependency addon, Other model
 #
-# Shrink levels: none, soft, hard, extreme
+# Shrink levels: none, soft, hard, max
 SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "none": {
         "T_EXP": "none",
@@ -128,29 +128,29 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "soft": {
         "T_EXP": "none",
         "T_OTH": "none",
-        "D_EXP": "soft",
+        "D_EXP": "none",  # Full content for expanded models in dependencies
         "D_REL": "soft",
-        "D_OTH": "extreme",
+        "D_OTH": "max",
     },
     "medium": {
         "T_EXP": "none",
         "T_OTH": "soft",
         "D_EXP": "soft",
         "D_REL": "hard",
-        "D_OTH": "extreme",
+        "D_OTH": "max",
     },
     "hard": {
         "T_EXP": "soft",
         "T_OTH": "hard",
         "D_EXP": "hard",
         "D_REL": "hard",
-        "D_OTH": "extreme",
+        "D_OTH": "max",
     },
-    "extreme": {
+    "max": {
         "T_EXP": "soft",
-        "T_OTH": "extreme",
-        "D_EXP": "extreme",
-        "D_REL": "extreme",
-        "D_OTH": "extreme",
+        "T_OTH": "max",
+        "D_EXP": "max",
+        "D_REL": "max",
+        "D_OTH": "max",
     },
 }

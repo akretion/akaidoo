@@ -25,7 +25,8 @@ def my_function():
 
 def test_shrink_python_file_default(sample_python_file: Path):
     """Test the default shrinking behavior."""
-    shrunken_content, _, _, _ = shrink_python_file(str(sample_python_file))
+    result = shrink_python_file(str(sample_python_file))
+    shrunken_content = result.content
     assert "class MyClass:" in shrunken_content
     assert 'field = "value"' in shrunken_content
     assert "def my_method(self):" in shrunken_content
@@ -38,9 +39,8 @@ def test_shrink_python_file_default(sample_python_file: Path):
 
 def test_shrink_python_file_aggressive(sample_python_file: Path):
     """Test the aggressive shrinking behavior."""
-    shrunken_content, _, _, _ = shrink_python_file(
-        str(sample_python_file), aggressive=True
-    )
+    result = shrink_python_file(str(sample_python_file), aggressive=True)
+    shrunken_content = result.content
     assert "class MyClass:" in shrunken_content
     assert 'field = "value"' in shrunken_content
     assert "def my_method(self):" not in shrunken_content

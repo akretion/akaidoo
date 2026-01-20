@@ -143,13 +143,30 @@ def shrink_python_file(
     prune_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
     skip_expanded_content: bool = False,
+    expanded_shrink_level: Optional[str] = None,
+    related_shrink_level: Optional[str] = None,
+    other_shrink_level: Optional[str] = None,
 ) -> ShrinkResult:
     """
     Shrinks Python code from a file.
-    Returns (shrunken_content, actually_expanded_models, first_header_suffix, expanded_locations).
+
+    Per-model shrink levels:
+    - expanded_shrink_level: Level for expanded models (default: "none")
+    - related_shrink_level: Level for related models (default: shrink_level)
+    - other_shrink_level: Level for other models (default: shrink_level)
+
+    Returns ShrinkResult with shrunken content and metadata.
     """
     if shrink_level is None:
         shrink_level = "hard" if aggressive else "soft"
+
+    # Set per-category defaults if not provided
+    if expanded_shrink_level is None:
+        expanded_shrink_level = "none"
+    if related_shrink_level is None:
+        related_shrink_level = shrink_level
+    if other_shrink_level is None:
+        other_shrink_level = shrink_level
 
     # Note: Even if 'none', we might need to parse to get line ranges or apply skip_expanded_content
     # So we only return early if we don't care about those features?
@@ -174,6 +191,8 @@ def shrink_python_file(
     prune_methods = prune_methods or set()
     actually_expanded_models = set()
     expanded_locations: Dict[str, List[Tuple[int, int, str]]] = {}
+    model_shrink_levels: Dict[str, str] = {}  # Track effective shrink level per model
+    any_content_skipped = False  # Track if any expanded content was skipped
 
     # Pre-scan for Odoo models count
     odoo_models_count = 0
@@ -222,7 +241,7 @@ def shrink_python_file(
                         should_prune_specifically = True
                         break
 
-        if effective_level in ("hard", "extreme") and not should_prune_specifically:
+        if effective_level in ("hard", "max") and not should_prune_specifically:
             return
 
         body_node = func_def_node.child_by_field_name("body")
@@ -288,14 +307,16 @@ def shrink_python_file(
                 end_line = node.end_point[0] + 1
                 line_range_str = f" (lines {start_line}-{end_line})"
 
-                # Store location info
+                # Store location info and track effective shrink level
                 for m in model_names & expand_models:
                     if m not in expanded_locations:
                         expanded_locations[m] = []
                     type_ = model_map[m]
                     expanded_locations[m].append((start_line, end_line, type_))
+                    model_shrink_levels[m] = "none"  # Expanded = full content
 
                 if skip_expanded_content:
+                    any_content_skipped = True
                     continue
 
                 if odoo_models_count > 1:
@@ -337,9 +358,22 @@ def shrink_python_file(
                             expanded_locations[m] = []
                         type_ = model_map[m]
                         expanded_locations[m].append((start_line, end_line, type_))
+                        model_shrink_levels[m] = "none"  # Expanded = full content
 
                     if skip_expanded_content:
+                        any_content_skipped = True
                         continue
+
+                # Track shrink level for non-expanded models in this class
+                # Each model gets its own level based on category
+                for m in model_names:
+                    if m not in model_shrink_levels:
+                        if m in expand_models:
+                            model_shrink_levels[m] = expanded_shrink_level
+                        elif m in relevant_models:
+                            model_shrink_levels[m] = related_shrink_level
+                        else:
+                            model_shrink_levels[m] = other_shrink_level
 
                 if effective_level == "none":
                     class_full_text = code_bytes[
@@ -361,7 +395,7 @@ def shrink_python_file(
                             expr = child.child(0)
                             if expr and expr.type == "assignment":
                                 f_info = _get_field_info(child, code_bytes)
-                                if f_info["is_field"] and effective_level == "extreme":
+                                if f_info["is_field"] and effective_level == "max":
                                     if f_info["compute"]:
                                         f_label = (
                                             f"{f_info['name']} ({f_info['compute']})"
@@ -398,7 +432,7 @@ def shrink_python_file(
                                 override_level=effective_level,
                             )
 
-                    if effective_level == "extreme":
+                    if effective_level == "max":
                         if non_computed_fields:
                             shrunken_parts.append(
                                 f"    # Shrunk non computed fields: {', '.join(non_computed_fields)}"
@@ -430,6 +464,8 @@ def shrink_python_file(
         expanded_models=actually_expanded_models,
         header_suffix=first_header_suffix,
         expanded_locations=expanded_locations,
+        model_shrink_levels=model_shrink_levels,
+        content_skipped=any_content_skipped,
     )
 
 
@@ -452,7 +488,7 @@ def main():
         "-L",
         "--shrink-level",
         type=str,
-        choices=["none", "soft", "hard", "extreme"],
+        choices=["none", "soft", "hard", "max"],
         default=None,
     )
     cli_parser.add_argument(

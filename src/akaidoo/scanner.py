@@ -275,6 +275,16 @@ def scan_addon_files(
                             )
                             shrink_level = matrix_row.get(category, "soft")
 
+                            # Get per-category shrink levels for proper per-model handling
+                            if file_in_target_addon:
+                                expanded_shrink_level = matrix_row.get("T_EXP", "none")
+                                related_shrink_level = matrix_row.get("T_OTH", "soft")
+                                other_shrink_level = matrix_row.get("T_OTH", "soft")
+                            else:
+                                expanded_shrink_level = matrix_row.get("D_EXP", "none")
+                                related_shrink_level = matrix_row.get("D_REL", "soft")
+                                other_shrink_level = matrix_row.get("D_OTH", "max")
+
                             # Always run shrinker to support context headers/navigation
                             try:
                                 header_path = abs_file_path.relative_to(Path.cwd())
@@ -286,11 +296,14 @@ def scan_addon_files(
                                 shrink_level=shrink_level,
                                 expand_models=expand_models_set,
                                 skip_imports=(shrink_mode != "none"),
-                                strip_metadata=(shrink_level in ("hard", "extreme")),
+                                strip_metadata=(shrink_level in ("hard", "max")),
                                 relevant_models=relevant_models,
                                 prune_methods=prune_methods,
                                 header_path=str(header_path),
                                 skip_expanded_content=skip_expanded,
+                                expanded_shrink_level=expanded_shrink_level,
+                                related_shrink_level=related_shrink_level,
+                                other_shrink_level=other_shrink_level,
                             )
                             shrunken_content[abs_file_path] = shrink_result.content
                             shrunken_info[abs_file_path] = {
@@ -298,6 +311,8 @@ def scan_addon_files(
                                 "expanded_models": shrink_result.expanded_models,
                                 "header_suffix": shrink_result.header_suffix or "",
                                 "expanded_locations": shrink_result.expanded_locations,
+                                "model_shrink_levels": shrink_result.model_shrink_levels,
+                                "content_skipped": shrink_result.content_skipped,
                             }
                     found_files.append(abs_file_path)
 

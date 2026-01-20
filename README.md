@@ -125,10 +125,29 @@ different categories of models.
 | Effort Level         | T_EXP | T_OTH | D_EXP | D_REL | D_OTH |
 | :------------------- | :---- | :---- | :---- | :---- | :---- |
 | **`none`**           | FULL  | FULL  | FULL  | FULL  | FULL  |
-| **`soft`** (default) | FULL  | FULL  | SOFT  | SOFT  | MAX   |
+| **`soft`** (default) | FULL  | FULL  | FULL  | SOFT  | MAX   |
 | **`medium`**         | FULL  | SOFT  | SOFT  | HARD  | MAX   |
 | **`hard`**           | SOFT  | HARD  | HARD  | HARD  | MAX   |
-| **`extreme`**        | SOFT  | MAX   | MAX   | MAX   | MAX   |
+| **`max`**            | SOFT  | MAX   | MAX   | MAX   | MAX   |
+
+**Model Indicators in Tree View:**
+
+The tree view shows per-model shrink status with a heat map color scheme (hot colors =
+full content, cold colors = heavily shrunk):
+
+| Indicator  | Color     | Meaning                               |
+| :--------- | :-------- | :------------------------------------ |
+| `(full)`   | Red/bold  | Full implementation preserved         |
+| `(soft)`   | Yellow    | Method bodies shrunk, signatures kept |
+| `(hard)`   | Cyan      | Only fields & minimal API             |
+| `(max)`    | Dim/white | Extreme shrinking, skeleton only      |
+| `(45-320)` | -         | Agent mode: content at lines 45-320   |
+
+Example:
+
+```
+├── models/account_move.py (217KB) [Models: account.move (full), account.partial.reconcile (soft), account.cash.rounding (max)]
+```
 
 ### Fine-Grained Controls
 
@@ -186,7 +205,7 @@ akaidoo sale_timesheet --expand project.task --prune-methods project.task.large_
 structure, perfect for understanding relationships:
 
 ```console
-akaidoo account -c odoo.conf --shrink extreme -x
+akaidoo account -c odoo.conf --shrink max -x
 ```
 
 **5. Migration Context** Gather code + migration scripts for an upgrade:

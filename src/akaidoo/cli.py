@@ -21,7 +21,6 @@ from .tree import print_akaidoo_tree, get_akaidoo_tree_string
 from .config import TOKEN_FACTOR
 from .context import (
     resolve_akaidoo_context,
-    _calculate_expanded_files_size,
 )
 from .service import get_service
 
@@ -432,7 +431,7 @@ def akaidoo_command_entrypoint(
     shrink_mode: str = typer.Option(
         "soft",
         "--shrink",
-        help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), extreme (max shrink everywhere).",
+        help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), max (max shrink everywhere).",
         case_sensitive=False,
     ),
     expand_models_str: Optional[str] = typer.Option(
@@ -604,8 +603,8 @@ Conventions:
             shrunken_files_info=context.shrunken_files_info,
         )
 
-    # Token and Size Summary (Calculate for reporting and ordering)
-    total_chars = 0
+    # Token and Size Summary (use pre-calculated context size for consistency)
+    # Build model_chars_map for per-model size attribution (display purposes)
     model_chars_map: Dict[str, int] = {}
 
     for f in context.found_files_list:
@@ -617,7 +616,6 @@ Conventions:
                 content = ""
 
         file_size = len(content)
-        total_chars += file_size
 
         # Attribute size to models defined in this file
         if f.suffix == ".py":
@@ -636,10 +634,14 @@ Conventions:
             except Exception:
                 pass
 
-    # In agent mode, add the size of expanded files that LLM will read separately
-    if agent_mode:
-        expanded_chars = _calculate_expanded_files_size(context)
-        total_chars += expanded_chars
+    # Use pre-calculated context size for consistency with budget enforcement
+    total_chars = context.context_size_chars
+    if total_chars == 0:
+        # Fallback if context_size_chars wasn't set (e.g., directory mode)
+        total_chars = sum(
+            len(context.shrunken_files_content.get(f.resolve(), "")) or f.stat().st_size
+            for f in context.found_files_list
+        )
 
     total_kb = total_chars / 1024
     total_tokens = int(total_chars * TOKEN_ESTIMATION_FACTOR / 1000)

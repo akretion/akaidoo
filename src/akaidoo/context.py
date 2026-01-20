@@ -1059,10 +1059,17 @@ def calculate_context_size(
         except ValueError:
             header_path = fp.resolve()
         header = f"# FILEPATH: {header_path}\n"
-        content = context.shrunken_files_content.get(
-            fp.resolve(),
-            re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
-        )
+
+        # Get content from shrunken_files_content if available
+        content = context.shrunken_files_content.get(fp.resolve())
+        if content is None:
+            # Fallback: read file directly
+            # Only strip leading comments from Python files (shebang/license)
+            raw_content = fp.read_text(encoding="utf-8")
+            if fp.suffix == ".py":
+                content = re.sub(r"^(?:#.*\n)+", "", raw_content)
+            else:
+                content = raw_content
         total_size += len(header) + len(content) + 2
 
     # Size of diffs
@@ -1156,10 +1163,16 @@ def get_akaidoo_context_dump(
             )
             header = f"# FILEPATH: {header_path}{suffix}\n"
 
-            content = context.shrunken_files_content.get(
-                fp.resolve(),
-                re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
-            )
+            # Get content from shrunken_files_content if available
+            content = context.shrunken_files_content.get(fp.resolve())
+            if content is None:
+                # Fallback: read file directly
+                # Only strip leading comments from Python files (shebang/license)
+                raw_content = fp.read_text(encoding="utf-8")
+                if fp.suffix == ".py":
+                    content = re.sub(r"^(?:#.*\n)+", "", raw_content)
+                else:
+                    content = raw_content
             all_content.append(header + content)
         except Exception:
             continue
