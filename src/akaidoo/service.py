@@ -47,8 +47,6 @@ class ContextOptions:
 
     # Model expansion
     expand_models_str: Optional[str] = None
-    auto_expand: bool = True
-    focus_models_str: Optional[str] = None
     add_expand_str: Optional[str] = None
     rm_expand_str: Optional[str] = None
 
@@ -91,8 +89,6 @@ class AkaidooService:
         shrink_mode: str = "soft",
         prune_methods_str: Optional[str] = None,
         expand_models_str: Optional[str] = None,
-        auto_expand: bool = True,
-        focus_models_str: Optional[str] = None,
         add_expand_str: Optional[str] = None,
         rm_expand_str: Optional[str] = None,
         skip_expanded: bool = False,
@@ -118,7 +114,6 @@ class AkaidooService:
             prune_methods_str: Methods to prune (e.g., "Model.method")
             expand_models_str: Models to fully expand
             auto_expand: Auto-expand high-score models
-            focus_models_str: Only expand these models
             add_expand_str: Add models to auto-expand set
             rm_expand_str: Remove models from expand set
             skip_expanded: Skip expanded content (for agent mode)
@@ -145,8 +140,6 @@ class AkaidooService:
             shrink_mode=shrink_mode,
             prune_methods_str=prune_methods_str,
             expand_models_str=expand_models_str,
-            auto_expand=auto_expand,
-            focus_models_str=focus_models_str,
             add_expand_str=add_expand_str,
             rm_expand_str=rm_expand_str,
             skip_expanded=skip_expanded,
@@ -180,8 +173,6 @@ class AkaidooService:
             shrink_mode=options.shrink_mode,
             prune_methods_str=options.prune_methods_str,
             expand_models_str=options.expand_models_str,
-            auto_expand=options.auto_expand,
-            focus_models_str=options.focus_models_str,
             add_expand_str=options.add_expand_str,
             rm_expand_str=options.rm_expand_str,
             skip_expanded=options.skip_expanded,
@@ -342,7 +333,6 @@ class AkaidooService:
             "related_models": sorted(context.new_related),
             "pruned_addons": list(context.pruned_addons.keys()),
             "effective_shrink_mode": context.effective_shrink_mode,
-            "effective_prune_mode": context.effective_prune_mode,
             "budget_escalation_level": context.budget_escalation_level,
         }
 

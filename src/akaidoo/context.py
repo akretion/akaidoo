@@ -282,7 +282,6 @@ def _build_excluded_addons(
 
 def _parse_expansion_options(
     expand_models_str: Optional[str],
-    focus_models_str: Optional[str],
     add_expand_str: Optional[str],
     rm_expand_str: Optional[str],
     prune_methods_str: Optional[str],
@@ -301,40 +300,19 @@ def _parse_expansion_options(
     rm_expand_set: Set[str] = set()
     prune_methods_set: Set[str] = set()
 
-    if expand_models_str:
-        expand_models_set = {m.strip() for m in expand_models_str.split(",")}
     if rm_expand_str:
         rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
     if prune_methods_str:
         prune_methods_set = {m.strip() for m in prune_methods_str.split(",")}
 
-    # If focus models are provided, auto-expand is disabled automatically
-    if focus_models_str and auto_expand:
-        auto_expand = False
-
-    # Validate mutually exclusive options
-    focus_modes_count = sum([bool(focus_models_str), bool(add_expand_str), auto_expand])
-    if focus_modes_count > 1:
-        focus_flags = [
-            name
-            for flag, name in [
-                (focus_models_str, "--focus-models"),
-                (add_expand_str, "--add-expand"),
-                (auto_expand, "--auto-expand"),
-            ]
-            if flag
-        ]
-        echo.error(
-            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
-            "Use either --focus-models, --add-expand, or --auto-expand."
-        )
-        raise typer.Exit(1)
-
-    if focus_models_str:
-        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
+    if expand_models_str:
+        # Explicit mode: disables auto-expand
+        focus_models_set = {m.strip() for m in expand_models_str.split(",")}
         auto_expand = False
         expand_models_set = focus_models_set.copy()
-    elif add_expand_str:
+
+    if add_expand_str:
+        # Additive mode: works with auto-expand (or adds to explicit list if both used, though weird)
         add_expand_set = {m.strip() for m in add_expand_str.split(",")}
 
     return (
@@ -591,8 +569,6 @@ def resolve_akaidoo_context(
     no_exclude_addons_str: Optional[str] = None,
     shrink_mode: str = "none",
     expand_models_str: Optional[str] = None,
-    auto_expand: bool = True,
-    focus_models_str: Optional[str] = None,
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
     prune_methods_str: Optional[str] = None,
@@ -630,11 +606,10 @@ def resolve_akaidoo_context(
         auto_expand,
     ) = _parse_expansion_options(
         expand_models_str,
-        focus_models_str,
         add_expand_str,
         rm_expand_str,
         prune_methods_str,
-        auto_expand,
+        True,
     )
 
     # Expand inputs (Project Mode / Smart Path)
@@ -982,8 +957,6 @@ def resolve_akaidoo_context(
                 no_exclude_addons_str=no_exclude_addons_str,
                 shrink_mode=next_shrink,
                 expand_models_str=expand_models_str,
-                auto_expand=auto_expand,
-                focus_models_str=focus_models_str,
                 add_expand_str=add_expand_str,
                 rm_expand_str=rm_expand_str,
                 prune_methods_str=prune_methods_str,

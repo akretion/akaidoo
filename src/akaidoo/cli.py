@@ -434,29 +434,17 @@ def akaidoo_command_entrypoint(
         help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), max (max shrink everywhere).",
         case_sensitive=False,
     ),
-    expand_models_str: Optional[str] = typer.Option(
-        None,
-        "--expand",
-        "-E",
-        help="Comma-separated list of Odoo models to fully expand even when shrinking.",
-        show_default=False,
-    ),
     rm_expand_str: Optional[str] = typer.Option(
         None,
         "--rm-expand",
         help="Remove models from auto-expand set. Comma-separated list.",
         show_default=False,
     ),
-    auto_expand: bool = typer.Option(
-        True,
-        "--auto-expand/--no-auto-expand",
-        help="Automatically expand models significantly extended in target addons (score >= 7). Score: field=1, method=3, 10 lines=2.",
-    ),
-    focus_models_str: Optional[str] = typer.Option(
+    expand_models_str: Optional[str] = typer.Option(
         None,
-        "--focus-models",
-        "-F",
-        help="Only expand specific models (overrides auto-expand). Comma-separated list.",
+        "--expand",
+        "-E",
+        help="Only expand specific models (explicit mode, disables auto-expand). Comma-separated list.",
         show_default=False,
     ),
     add_expand_str: Optional[str] = typer.Option(
@@ -546,8 +534,6 @@ def akaidoo_command_entrypoint(
         no_exclude_addons_str=no_exclude_addons_str,
         shrink_mode=shrink_mode,
         expand_models_str=expand_models_str,
-        auto_expand=auto_expand,
-        focus_models_str=focus_models_str,
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
         prune_methods_str=prune_methods_str,
