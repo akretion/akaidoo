@@ -572,17 +572,29 @@ def akaidoo_command_entrypoint(
         raise typer.Exit(1)
 
     cmd_call = shlex.join(sys.argv)
-    introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
+    if agent_mode:
+        introduction = """## ⚠️ METADATA & CONSTRAINTS
+*   **Purpose:** This file is a high-level map of the Odoo module structure, inheritance order, and data schema.
+*   **Constraint:** **ALL METHOD LOGIC IS REMOVED.**
+*   **Constraint:** You see `pass # shrunk` or `field = ... # shrunk` placeholders.
+*   **Instruction:** **DO NOT** try to guess or hallucinate the implementation details of methods found here.
+*   **Instruction:** Use this map ONLY to understand:
+    1.  **Inheritance:** Which model inherits which (e.g., `_inherit = ['mail.thread']`).
+    2.  **Relations:** How models link (e.g., `partner_id` links to `res.partner`).
+    3.  **Navigation:** Use the `# FILEPATH` tags found here to locate the file if you need to read the actual source code logic.
+"""
+    else:
+        introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
 Context: The following is a codebase dump produced by the akaidoo CLI.
 Command: {cmd_call}
 Conventions:
 1. Files start with `# FILEPATH: [path]`.
 2. Some files were filtered out to save tokens; ask for them if you need."""
-    if shrink_mode != "none":
-        introduction += """
+        if shrink_mode != "none":
+            introduction += """
 3. `# shrunk` indicates code removed to save tokens; ask for full content if a specific logic flow is unclear."""
-    if shrink_mode == "hard":
-        introduction += """
+        if shrink_mode == "hard":
+            introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
     edit_mode = edit_in_editor
