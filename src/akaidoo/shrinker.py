@@ -46,9 +46,6 @@ STRUCTURAL_ATTRS = {
     "related",
     "compute",
     "store",
-    "check_company",
-    "domain",
-    "context",
 }
 
 
@@ -484,6 +481,37 @@ def shrink_python_file(
                         effective_level = best_level
 
                 if effective_level == "prune":
+                    # For pruned models, keep a minimal skeleton (header + structural attrs)
+                    header_end = body_node.start_byte
+                    class_header = (
+                        code_bytes[node.start_byte : header_end].decode("utf8").strip()
+                    )
+                    shrunken_parts.append(class_header)
+
+                    found_structural_attrs = False
+                    for child in body_node.children:
+                        if child.type == "expression_statement":
+                            expr = child.child(0)
+                            if expr and expr.type == "assignment":
+                                left = expr.child_by_field_name("left")
+                                if left and left.type == "identifier":
+                                    attr_name = code_bytes[
+                                        left.start_byte : left.end_byte
+                                    ].decode("utf-8")
+                                    if attr_name in ("_name", "_inherit", "_inherits"):
+                                        line_bytes = code_bytes[
+                                            child.start_byte : child.end_byte
+                                        ]
+                                        line_text = line_bytes.decode("utf8").strip()
+                                        shrunken_parts.append(
+                                            f"    {clean_line(line_text)}"
+                                        )
+                                        found_structural_attrs = True
+
+                    if not found_structural_attrs:
+                        shrunken_parts.append("    pass  # pruned")
+
+                    shrunken_parts.append("")
                     continue
 
                 if effective_level == "none":
