@@ -798,26 +798,54 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                             }
                         )
 
+        # Generate dependency tree string (modules only, no files)
+        tree_str = get_akaidoo_tree_string(
+            root_addon_names=context.selected_addon_names,
+            addons_set=context.addons_set,
+            addon_files_map={},  # Empty to hide files
+            odoo_series=context.final_odoo_series,
+            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            pruned_addons=context.pruned_addons,
+            shrunken_files_info=context.shrunken_files_info,
+            use_ansi=False,
+        )
+
+        typer.echo(
+            "\n"
+            + typer.style(
+                "--- AGENT INSTRUCTIONS (CONTEXT INGESTION) ---",
+                fg=typer.colors.CYAN,
+                bold=True,
+            )
+        )
+
+        # 1. Project Structure
+        typer.echo(
+            typer.style("\n## 1. PROJECT STRUCTURE (Dependency Order)", bold=True)
+        )
+        typer.echo(
+            "The following tree defines the module inheritance order (Global Context)."
+        )
+        typer.echo("Logic in lower modules overrides logic in parent modules.")
+        typer.echo("```text")
+        typer.echo(tree_str)
+        typer.echo("```")
+
+        # 2. Schema Map
+        typer.echo(typer.style("\n## 2. SCHEMA MAP", bold=True))
+        typer.echo(
+            "Use your 'read_file' tool to read the structural skeleton (fields/relations) mapped here:"
+        )
+        typer.echo(f"- Path: {output_file}")
+        typer.echo(
+            "  (Note: This file contains summarized Odoo models. It is only for understanding data structures and finding file paths.)"
+        )
+
+        # 3. Logic & Source Code
         if locations_by_model:
+            typer.echo(typer.style("\n## 3. LOGIC & SOURCE CODE", bold=True))
             typer.echo(
-                "\n"
-                + typer.style(
-                    "--- AGENT INSTRUCTIONS (CONTEXT INGESTION) ---",
-                    fg=typer.colors.CYAN,
-                    bold=True,
-                )
-            )
-            typer.echo(
-                typer.style(
-                    f"1. Use your 'read_file' tool to read this map of summarized secondary models file ENTIRELY: {output_file}",
-                    bold=True,
-                )
-            )
-            typer.echo(
-                typer.style(
-                    "2. Use your 'read_file' tool to read in parallel the following relevant models from their Path at the proper lines Range:",
-                    bold=True,
-                )
+                "Use your 'read_file' tool to read the IMPLEMENTATION LOGIC in parallel from these specific ranges:"
             )
 
             for m in sorted(locations_by_model.keys()):

@@ -46,6 +46,9 @@ STRUCTURAL_ATTRS = {
     "related",
     "compute",
     "store",
+    "check_company",
+    "domain",
+    "context",
 }
 
 
