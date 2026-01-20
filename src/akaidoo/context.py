@@ -964,7 +964,9 @@ def resolve_akaidoo_context(
     )
 
     # Calculate and store context size
-    context.context_size_chars = calculate_context_size(context)
+    # Only include expanded files size in agent mode (skip_expanded=True)
+    # because in normal mode, expanded content is already in shrunken_files_content
+    context.context_size_chars = calculate_context_size(context, skip_expanded)
 
     # Budget enforcement with escalation
     if context_budget is not None and context.context_size_chars > context_budget:
@@ -1015,7 +1017,7 @@ def resolve_akaidoo_context(
                 skip_expanded=skip_expanded,
                 context_budget=None,  # Don't recurse with budget
             )
-            context.context_size_chars = calculate_context_size(context)
+            context.context_size_chars = calculate_context_size(context, skip_expanded)
             context.budget_escalation_level = current_level
             context.effective_shrink_mode = next_shrink
             context.effective_prune_mode = next_prune
