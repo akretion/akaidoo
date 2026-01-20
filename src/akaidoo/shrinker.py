@@ -37,6 +37,78 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
         return content
 
 
+STRUCTURAL_ATTRS = {
+    "comodel_name",
+    "inverse_name",
+    "relation",
+    "column1",
+    "column2",
+    "related",
+    "compute",
+    "store",
+}
+
+
+def _reconstruct_field_node(node, code_bytes: bytes) -> str:
+    """
+    Reconstructs a field definition keeping only positional args
+    and whitelisted keyword args (STRUCTURAL_ATTRS).
+    """
+    try:
+        assign = node.child(0)
+        if not assign or assign.type != "assignment":
+            return code_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+
+        # Extract Field Name (Left side)
+        left = assign.child_by_field_name("left")
+        field_name = code_bytes[left.start_byte : left.end_byte].decode("utf-8")
+
+        # Extract Function Call (Right side)
+        right = assign.child_by_field_name("right")
+        if not right or right.type != "call":
+            return code_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+
+        func_node = right.child_by_field_name("function")
+        func_name = code_bytes[func_node.start_byte : func_node.end_byte].decode(
+            "utf-8"
+        )
+
+        # Process Arguments
+        args_node = right.child_by_field_name("arguments")
+        clean_args = []
+
+        if args_node:
+            for arg in args_node.children:
+                if arg.type in ("(", ")", ","):
+                    continue
+
+                if arg.type == "keyword_argument":
+                    key_node = arg.child_by_field_name("name")
+                    key = code_bytes[key_node.start_byte : key_node.end_byte].decode(
+                        "utf-8"
+                    )
+                    if key in STRUCTURAL_ATTRS:
+                        val_node = arg.child_by_field_name("value")
+                        # Strip newlines/indentation from value to compact it
+                        val = code_bytes[
+                            val_node.start_byte : val_node.end_byte
+                        ].decode("utf-8")
+                        val = re.sub(r"\s+", " ", val).strip()
+                        clean_args.append(f"{key}={val}")
+                elif arg.type == "comment":
+                    continue
+                else:
+                    # Keep positional arguments (usually comodel_name/inverse_name)
+                    val = code_bytes[arg.start_byte : arg.end_byte].decode("utf-8")
+                    val = re.sub(r"\s+", " ", val).strip()
+                    clean_args.append(val)
+
+        return f"{field_name} = {func_name}({', '.join(clean_args)})"
+    except Exception:
+        # Fallback to original text if parsing fails
+        return code_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+
+
 def _get_field_info(node, code_bytes: bytes) -> Dict:
     """
     Extracts info from a field assignment node.
@@ -441,13 +513,11 @@ def shrink_python_file(
                                         non_computed_fields.append(f_info["name"])
 
                                     if f_info["comodel"] in relevant_models:
-                                        line_bytes = code_bytes[
-                                            child.start_byte : child.end_byte
-                                        ]
-                                        line_text = line_bytes.decode("utf8").strip()
-                                        shrunken_parts.append(
-                                            f"    {_strip_field_metadata(line_text)}"
+                                        # Use tree-sitter reconstruction to strip UI attributes
+                                        clean_def = _reconstruct_field_node(
+                                            child, code_bytes
                                         )
+                                        shrunken_parts.append(f"    {clean_def}")
                                 else:
                                     line_bytes = code_bytes[
                                         child.start_byte : child.end_byte
