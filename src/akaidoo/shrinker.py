@@ -241,7 +241,10 @@ def shrink_python_file(
                         should_prune_specifically = True
                         break
 
-        if effective_level in ("hard", "max") and not should_prune_specifically:
+        if (
+            effective_level in ("hard", "max", "prune")
+            and not should_prune_specifically
+        ):
             return
 
         body_node = func_def_node.child_by_field_name("body")
@@ -375,6 +378,33 @@ def shrink_python_file(
                         else:
                             model_shrink_levels[m] = other_shrink_level
 
+                # Recalculate effective level for the class based on contained models
+                if not should_expand:
+                    if not model_names:
+                        effective_level = shrink_level
+                    else:
+                        priorities = {
+                            "none": 0,
+                            "soft": 1,
+                            "hard": 2,
+                            "max": 3,
+                            "prune": 4,
+                        }
+                        min_prio = 5
+                        best_level = "prune"
+
+                        for m in model_names:
+                            lvl = model_shrink_levels.get(m, "soft")
+                            p = priorities.get(lvl, 1)
+                            if p < min_prio:
+                                min_prio = p
+                                best_level = lvl
+
+                        effective_level = best_level
+
+                if effective_level == "prune":
+                    continue
+
                 if effective_level == "none":
                     class_full_text = code_bytes[
                         node.start_byte : node.end_byte
@@ -488,7 +518,7 @@ def main():
         "-L",
         "--shrink-level",
         type=str,
-        choices=["none", "soft", "hard", "max"],
+        choices=["none", "soft", "hard", "max", "prune"],
         default=None,
     )
     cli_parser.add_argument(

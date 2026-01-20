@@ -12,12 +12,19 @@ from .utils import get_file_odoo_models
 NodeKey = str
 
 # Shrink level display names and color heat map (hot→cold = full→shrunk)
-SHRINK_DISPLAY = {"none": "full", "soft": "soft", "hard": "hard", "max": "max"}
+SHRINK_DISPLAY = {
+    "none": "full",
+    "soft": "soft",
+    "hard": "hard",
+    "max": "max",
+    "prune": "pruned",
+}
 SHRINK_COLORS = {
     "none": ("red", True, False),  # Hot: bold red - full content stands out
     "soft": ("yellow", False, False),  # Warm: yellow - lightly shrunk
     "hard": ("cyan", False, False),  # Cool: cyan - heavily shrunk
     "max": ("white", False, True),  # Cold: dim white - skeleton only
+    "prune": ("white", False, True),  # Hidden: dim white - skipped entirely
 }
 
 

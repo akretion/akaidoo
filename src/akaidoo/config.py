@@ -116,7 +116,7 @@ BUDGET_ESCALATION_LEVELS: List[Tuple[str, str]] = [
 #   D_REL: Dependency addon, Related model
 #   D_OTH: Dependency addon, Other model
 #
-# Shrink levels: none, soft, hard, max
+# Shrink levels: none, soft, hard, max, prune (prune = skip model entirely)
 SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "none": {
         "T_EXP": "none",
@@ -136,21 +136,21 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
         "T_EXP": "none",
         "T_OTH": "soft",
         "D_EXP": "soft",
-        "D_REL": "hard",
-        "D_OTH": "max",
+        "D_REL": "max",  # Related models → max shrink (keep skeleton)
+        "D_OTH": "prune",  # Other models → skip entirely
     },
     "hard": {
-        "T_EXP": "soft",
-        "T_OTH": "hard",
+        "T_EXP": "none",
+        "T_OTH": "soft",
         "D_EXP": "hard",
-        "D_REL": "hard",
-        "D_OTH": "max",
+        "D_REL": "prune",
+        "D_OTH": "prune",
     },
     "max": {
         "T_EXP": "soft",
         "T_OTH": "max",
         "D_EXP": "max",
-        "D_REL": "max",
-        "D_OTH": "max",
+        "D_REL": "prune",
+        "D_OTH": "prune",
     },
 }

@@ -296,7 +296,9 @@ def scan_addon_files(
                                 shrink_level=shrink_level,
                                 expand_models=expand_models_set,
                                 skip_imports=(shrink_mode != "none"),
-                                strip_metadata=(shrink_level in ("hard", "max")),
+                                strip_metadata=(
+                                    shrink_level in ("hard", "max", "prune")
+                                ),
                                 relevant_models=relevant_models,
                                 prune_methods=prune_methods,
                                 header_path=str(header_path),
@@ -305,6 +307,10 @@ def scan_addon_files(
                                 related_shrink_level=related_shrink_level,
                                 other_shrink_level=other_shrink_level,
                             )
+
+                            if not shrink_result.content.strip():
+                                continue
+
                             shrunken_content[abs_file_path] = shrink_result.content
                             shrunken_info[abs_file_path] = {
                                 "shrink_level": shrink_level,
