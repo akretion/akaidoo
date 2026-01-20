@@ -489,12 +489,6 @@ def akaidoo_command_entrypoint(
         "--editor-cmd",
         help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'.",
     ),
-    prune_mode: str = typer.Option(
-        "soft",
-        "--prune",
-        help="Prune mode: none (keep all), soft (expanded + parent/child + related), medium (expanded only), hard (target addons only).",
-        case_sensitive=False,
-    ),
     prune_methods_str: Optional[str] = typer.Option(
         None,
         "--prune-methods",
@@ -517,7 +511,7 @@ def akaidoo_command_entrypoint(
         None,
         "--context-budget",
         "-B",
-        help="Target context size budget (e.g., '100k' for 100k tokens, '50000' for 50000 chars). Akaidoo will auto-escalate shrink/prune modes to fit.",
+        help="Target context size budget (e.g., '100k' for 100k tokens, '50000' for 50000 chars). Akaidoo will auto-escalate shrink modes to fit.",
         show_default=False,
     ),
 ):
@@ -556,7 +550,6 @@ def akaidoo_command_entrypoint(
         focus_models_str=focus_models_str,
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
-        prune_mode=prune_mode,
         prune_methods_str=prune_methods_str,
         skip_expanded=agent_mode,
         context_budget=budget_chars,
@@ -610,7 +603,7 @@ Conventions:
             addons_set=context.addons_set,
             addon_files_map=context.addon_files_map,
             odoo_series=context.final_odoo_series,
-            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            excluded_addons=set(),
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
         )
@@ -753,7 +746,7 @@ Conventions:
             addons_set=context.addons_set,
             addon_files_map=context.addon_files_map,
             odoo_series=context.final_odoo_series,
-            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            excluded_addons=set(),
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
         )
@@ -838,7 +831,7 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             addons_set=context.addons_set,
             addon_files_map={},  # Empty to hide files
             odoo_series=context.final_odoo_series,
-            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            excluded_addons=set(),
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
             use_ansi=False,

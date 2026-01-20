@@ -93,15 +93,13 @@ BINARY_EXTS: Tuple[str, ...] = (
 MAX_DATA_FILE_SIZE = 20 * 1024
 
 # --- Budget Escalation Levels ---
-# Defines the progression of (shrink_mode, prune_mode) pairs to try
+# Defines the progression of shrink_mode to try
 # when context exceeds budget. Each level is more aggressive than the previous.
-BUDGET_ESCALATION_LEVELS: List[Tuple[str, str]] = [
-    ("soft", "soft"),  # Level 0: Default - shrink deps, soft prune
-    ("medium", "soft"),  # Level 1: Increase shrink
-    ("medium", "medium"),  # Level 2: Increase prune
-    ("hard", "medium"),  # Level 3: Hard shrink
-    ("hard", "hard"),  # Level 4: Hard prune (target addons only)
-    ("max", "hard"),  # Level 5: Maximum shrink
+BUDGET_ESCALATION_LEVELS: List[str] = [
+    "soft",  # Level 0
+    "medium",  # Level 1
+    "hard",  # Level 2
+    "max",  # Level 3
 ]
 
 # --- Shrink Matrix ---
@@ -116,7 +114,7 @@ BUDGET_ESCALATION_LEVELS: List[Tuple[str, str]] = [
 #   D_REL: Dependency addon, Related model
 #   D_OTH: Dependency addon, Other model
 #
-# Shrink levels: none, soft, hard, max, prune (prune = skip model entirely)
+# Shrink levels: none, soft, hard, max, prune (prune = keep skeleton only)
 SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "none": {
         "T_EXP": "none",

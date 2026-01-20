@@ -55,7 +55,6 @@ def scan_addon_files(
     shrink_mode: str = "none",
     expand_models_set: Optional[Set[str]] = None,
     relevant_models: Optional[Set[str]] = None,
-    prune_mode: str = "soft",
     prune_methods: Optional[Set[str]] = None,
     skip_expanded: bool = False,
 ) -> ScanResult:
@@ -230,21 +229,9 @@ def scan_addon_files(
                         found_file.suffix == ".py"
                         and found_file.name != "__manifest__.py"
                     ):
-                        need_models = (
-                            prune_mode == "medium" and not file_in_target_addon
-                        ) or (shrink_mode != "none")
+                        need_models = shrink_mode != "none"
                         if need_models:
                             file_models = get_file_odoo_models(abs_file_path)
-
-                    # File-level Pruning (Medium)
-                    if (
-                        prune_mode == "medium"
-                        and not file_in_target_addon
-                        and found_file.suffix == ".py"
-                        and found_file.name != "__manifest__.py"
-                    ):
-                        if not (file_models & relevant_models):
-                            continue
 
                     if shrink_mode != "none" and found_file.suffix == ".py":
                         if found_file.name != "__manifest__.py":

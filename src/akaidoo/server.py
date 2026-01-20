@@ -47,7 +47,7 @@ def read_source_code(
     3. **Targeted Expansion:** If you need to see the full definition of a related model,
        pass `expand_models=['the.model.name']` to see its complete source across the dependency tree.
     4. **Budget Control:** Pass `context_budget_tokens` (e.g., 100000) to limit context size.
-       Akaidoo will auto-escalate shrink/prune modes to fit within the budget.
+       Akaidoo will auto-escalate shrink modes to fit within the budget.
     """
     # Convert token budget to character budget
     budget_chars = None

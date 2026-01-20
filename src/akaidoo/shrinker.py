@@ -9,7 +9,7 @@ from .utils import _get_odoo_model_names_from_body, parser
 from .types import ShrinkResult
 
 
-def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
+def shrink_manifest(content: str) -> str:
     """
     Shrinks a manifest content by keeping only essential keys.
     """
@@ -26,9 +26,8 @@ def shrink_manifest(content: str, prune_mode: str = "soft") -> str:
             "pre_init_hook",
             "post_init_hook",
             "uninstall_hook",
+            "data",
         }
-        if prune_mode in ("soft", "none"):
-            keep_keys.add("data")
 
         new_manifest = {k: v for k, v in manifest.items() if k in keep_keys}
 

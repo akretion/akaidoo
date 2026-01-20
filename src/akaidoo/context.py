@@ -62,7 +62,6 @@ class AkaidooContext:
     new_related: Set[str] = field(default_factory=set)
     # Budget enforcement tracking
     effective_shrink_mode: str = "soft"
-    effective_prune_mode: str = "soft"
     budget_escalation_level: int = 0
     context_size_chars: int = 0
 
@@ -555,7 +554,6 @@ def _expand_parents_recursively(
 def _resolve_related_models(
     expand_models_set: Set[str],
     all_relations: Dict[str, Dict[str, Set[str]]],
-    prune_mode: str,
 ) -> tuple[Set[str], Set[str]]:
     """
     Resolve related models (comodels) from the expansion set.
@@ -568,12 +566,11 @@ def _resolve_related_models(
     """
     related_models_set: Set[str] = set()
 
-    if prune_mode in ("soft", "none"):
-        for m in expand_models_set:
-            if m in all_relations:
-                comodels = all_relations[m].get("comodels", set())
-                filtered = {n for n in comodels if n not in BLACKLIST_RELATION_EXPAND}
-                related_models_set.update(filtered)
+    for m in expand_models_set:
+        if m in all_relations:
+            comodels = all_relations[m].get("comodels", set())
+            filtered = {n for n in comodels if n not in BLACKLIST_RELATION_EXPAND}
+            related_models_set.update(filtered)
 
     new_related = related_models_set - expand_models_set
     return related_models_set, new_related
@@ -598,7 +595,6 @@ def resolve_akaidoo_context(
     focus_models_str: Optional[str] = None,
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
-    prune_mode: str = "soft",
     prune_methods_str: Optional[str] = None,
     skip_expanded: bool = False,
     context_budget: Optional[int] = None,
@@ -753,25 +749,7 @@ def resolve_akaidoo_context(
         selected_addon_names, addons_set, excluded_addons
     )
 
-    target_addon_names: List[str]
-    if prune_mode == "hard":
-        target_addon_names = [
-            addon
-            for addon in intermediate_target_addons
-            if addon in selected_addon_names
-        ]
-        if target_addon_names:
-            echo.info(
-                f"Focusing only on the target addon(s): {', '.join(target_addon_names)}",
-                bold=True,
-            )
-        else:
-            echo.warning(
-                f"Target addon(s) '{', '.join(selected_addon_names)}' excluded by other filters or dependencies. "
-                "No files processed."
-            )
-    else:
-        target_addon_names = intermediate_target_addons
+    target_addon_names: List[str] = intermediate_target_addons
     echo.info(
         f"Will scan files from {len(target_addon_names)} Odoo addons after all filters.",
         bold=True,
@@ -829,7 +807,7 @@ def resolve_akaidoo_context(
 
     # 2. Comodel (Relation) Resolution
     related_models_set, new_related = _resolve_related_models(
-        expand_models_set, all_relations, prune_mode
+        expand_models_set, all_relations
     )
 
     # Apply user overrides
@@ -852,13 +830,10 @@ def resolve_akaidoo_context(
         if addon_meta:
             addon_dir = addon_meta.path.resolve()
 
-            # Pruning Decision
+            # Pruning Decision - only check if addon is explicitly excluded
             reason = None
             if addon_to_scan_name in excluded_addons:
                 reason = "excluded"
-            elif prune_mode not in ("none", "hard"):
-                if not (addon_models.get(addon_to_scan_name, set()) & relevant_models):
-                    reason = "no_relevant_models"
 
             if reason:
                 pruned_addons[addon_to_scan_name] = reason
@@ -875,7 +850,7 @@ def resolve_akaidoo_context(
                 if is_dependency and shrink_mode != "none":
                     try:
                         content = manifest_path.read_text(encoding="utf-8")
-                        shrunken = shrink_manifest(content, prune_mode=prune_mode)
+                        shrunken = shrink_manifest(content)
                         shrunken_files_content[manifest_path.resolve()] = shrunken
                     except Exception as e:
                         echo.warning(
@@ -913,11 +888,10 @@ def resolve_akaidoo_context(
                 addon_name=addon_to_scan_name,
                 selected_addon_names=selected_addon_names,
                 includes=includes,
-                excluded_addons=excluded_addons if prune_mode != "none" else set(),
+                excluded_addons=set(),
                 shrink_mode=shrink_mode,
                 expand_models_set=expand_models_set,
                 relevant_models=relevant_models,
-                prune_mode=prune_mode,
                 prune_methods=prune_methods_set,
                 skip_expanded=skip_expanded,
             )
@@ -960,7 +934,6 @@ def resolve_akaidoo_context(
         enriched_additions=enriched_additions,
         new_related=new_related,
         effective_shrink_mode=shrink_mode,
-        effective_prune_mode=prune_mode,
     )
 
     # Calculate and store context size
@@ -972,10 +945,11 @@ def resolve_akaidoo_context(
     if context_budget is not None and context.context_size_chars > context_budget:
         # Find current escalation level
         current_level = 0
-        for i, (s, p) in enumerate(BUDGET_ESCALATION_LEVELS):
-            if s == shrink_mode and p == prune_mode:
-                current_level = i
-                break
+        try:
+            current_level = BUDGET_ESCALATION_LEVELS.index(shrink_mode)
+        except ValueError:
+            # If current mode is not in levels (e.g. "none"), start from beginning if we need to escalate
+            pass
 
         # Try escalating until we fit or run out of levels
         while (
@@ -983,13 +957,13 @@ def resolve_akaidoo_context(
             and current_level < len(BUDGET_ESCALATION_LEVELS) - 1
         ):
             current_level += 1
-            next_shrink, next_prune = BUDGET_ESCALATION_LEVELS[current_level]
+            next_shrink = BUDGET_ESCALATION_LEVELS[current_level]
 
             budget_tokens = int(context_budget * TOKEN_FACTOR / 1000)
             current_tokens = int(context.context_size_chars * TOKEN_FACTOR / 1000)
             echo.info(
                 f"Context size {current_tokens}k tokens exceeds budget {budget_tokens}k. "
-                f"Escalating to shrink={next_shrink}, prune={next_prune}..."
+                f"Escalating to shrink={next_shrink}..."
             )
 
             # Recursively rebuild with new modes (without budget to avoid infinite loop)
@@ -1012,7 +986,6 @@ def resolve_akaidoo_context(
                 focus_models_str=focus_models_str,
                 add_expand_str=add_expand_str,
                 rm_expand_str=rm_expand_str,
-                prune_mode=next_prune,
                 prune_methods_str=prune_methods_str,
                 skip_expanded=skip_expanded,
                 context_budget=None,  # Don't recurse with budget
@@ -1020,7 +993,6 @@ def resolve_akaidoo_context(
             context.context_size_chars = calculate_context_size(context, skip_expanded)
             context.budget_escalation_level = current_level
             context.effective_shrink_mode = next_shrink
-            context.effective_prune_mode = next_prune
 
         # Report final status
         final_tokens = int(context.context_size_chars * TOKEN_FACTOR / 1000)
@@ -1028,13 +1000,13 @@ def resolve_akaidoo_context(
         if context.context_size_chars <= context_budget:
             echo.info(
                 f"Budget met: {final_tokens}k tokens <= {budget_tokens}k budget "
-                f"(shrink={context.effective_shrink_mode}, prune={context.effective_prune_mode})",
+                f"(shrink={context.effective_shrink_mode})",
                 bold=True,
             )
         else:
             echo.warning(
                 f"Could not meet budget: {final_tokens}k tokens > {budget_tokens}k budget "
-                f"even at maximum escalation (shrink={context.effective_shrink_mode}, prune={context.effective_prune_mode})"
+                f"even at maximum escalation (shrink={context.effective_shrink_mode})"
             )
 
     return context
