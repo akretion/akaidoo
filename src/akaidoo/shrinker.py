@@ -441,7 +441,10 @@ def shrink_python_file(
                         expanded_locations[m].append((start_line, end_line, type_))
                         model_shrink_levels[m] = expanded_shrink_level
 
-                    if skip_expanded_content:
+                    # Only skip expanded content if it would be at full resolution (none)
+                    # If expanded_shrink_level != "none", the content is shrunk and small,
+                    # so we should include it rather than having the agent read full source
+                    if skip_expanded_content and expanded_shrink_level == "none":
                         any_content_skipped = True
                         continue
 

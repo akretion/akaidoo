@@ -308,10 +308,19 @@ def scan_addon_files(
                                 other_shrink_level=other_shrink_level,
                             )
 
-                            if not shrink_result.content.strip():
+                            has_content = bool(shrink_result.content.strip())
+                            has_expanded_locs = bool(shrink_result.expanded_locations)
+
+                            # Skip files with no content AND no expanded locations
+                            if not has_content and not has_expanded_locs:
                                 continue
 
-                            shrunken_content[abs_file_path] = shrink_result.content
+                            # Store content only if non-empty
+                            if has_content:
+                                shrunken_content[abs_file_path] = shrink_result.content
+
+                            # Always store info if there's content OR expanded locations
+                            # (needed for token estimation in agent mode)
                             shrunken_info[abs_file_path] = {
                                 "shrink_level": shrink_level,
                                 "expanded_models": shrink_result.expanded_models,

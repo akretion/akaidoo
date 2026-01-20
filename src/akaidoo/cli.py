@@ -620,29 +620,59 @@ Conventions:
     model_chars_map: Dict[str, int] = {}
 
     for f in context.found_files_list:
-        content = context.shrunken_files_content.get(f.resolve())
+        abs_path = f.resolve()
+        content = context.shrunken_files_content.get(abs_path)
+        info = context.shrunken_files_info.get(abs_path)
+
+        # For files with expanded_locations (agent mode), calculate size from source ranges
+        if info and info.get("expanded_locations"):
+            try:
+                file_content = f.read_text(encoding="utf-8")
+                lines = file_content.split("\n")
+                for model_name, ranges in info["expanded_locations"].items():
+                    for start_line, end_line, _ in ranges:
+                        start_idx = max(0, start_line - 1)
+                        end_idx = min(len(lines), end_line)
+                        range_content = "\n".join(lines[start_idx:end_idx])
+                        model_chars_map[model_name] = model_chars_map.get(
+                            model_name, 0
+                        ) + len(range_content)
+            except Exception:
+                pass
+
+        # For regular content (non-expanded models)
         if content is None:
             try:
                 content = f.read_text(encoding="utf-8")
             except Exception:
                 content = ""
 
-        file_size = len(content)
+        file_size = len(content) if content else 0
 
-        # Attribute size to models defined in this file
-        if f.suffix == ".py":
+        # Attribute size to models defined in this file (for non-expanded content)
+        if f.suffix == ".py" and file_size > 0:
             try:
                 # We use the shrunken info if available, otherwise scan
-                info = context.shrunken_files_info.get(f.resolve())
-                if info and "models" in info:
+                if info and "model_shrink_levels" in info:
+                    # Only count models that are NOT in expanded_locations
+                    expanded_models = set(info.get("expanded_locations", {}).keys())
+                    models_in_file = [
+                        m
+                        for m in info["model_shrink_levels"].keys()
+                        if m not in expanded_models
+                    ]
+                elif info and "models" in info:
                     models_in_file = info["models"].keys()
                 else:
                     models_in_file = get_odoo_model_stats(content).keys()
 
                 if models_in_file:
-                    # Simple attribution: full file size to each model mentioned
+                    # Simple attribution: distribute file size among models
+                    per_model_size = (
+                        file_size // len(models_in_file) if models_in_file else 0
+                    )
                     for m in models_in_file:
-                        model_chars_map[m] = model_chars_map.get(m, 0) + file_size
+                        model_chars_map[m] = model_chars_map.get(m, 0) + per_model_size
             except Exception:
                 pass
 
@@ -779,6 +809,10 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
     if agent_mode:
         locations_by_model = {}
         for fp, info in context.shrunken_files_info.items():
+            # Only include expanded locations if content was actually skipped
+            # (i.e., the LLM needs to read the full source, not the shrunk version)
+            if not info.get("content_skipped", False):
+                continue
             locs = info.get("expanded_locations")
             if locs:
                 try:

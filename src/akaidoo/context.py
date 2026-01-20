@@ -1056,22 +1056,44 @@ def calculate_context_size(
 
     # Size of files in found_files_list (the dump content)
     for fp in context.found_files_list:
-        try:
-            header_path = fp.resolve().relative_to(Path.cwd())
-        except ValueError:
-            header_path = fp.resolve()
-        header = f"# FILEPATH: {header_path}\n"
+        abs_path = fp.resolve()
 
         # Get content from shrunken_files_content if available
-        content = context.shrunken_files_content.get(fp.resolve())
+        content = context.shrunken_files_content.get(abs_path)
+
+        # Check if this file has expanded content that was skipped
+        info = context.shrunken_files_info.get(abs_path, {})
+        has_expanded_locs = bool(info.get("expanded_locations"))
+
         if content is None:
-            # Fallback: read file directly
-            # Only strip leading comments from Python files (shebang/license)
-            raw_content = fp.read_text(encoding="utf-8")
-            if fp.suffix == ".py":
-                content = re.sub(r"^(?:#.*\n)+", "", raw_content)
+            if has_expanded_locs and include_expanded_files:
+                # In agent mode: file has only expanded models, content is empty
+                # The expanded content will be counted by _calculate_expanded_files_size()
+                # So we just add header overhead, not file content
+                try:
+                    header_path = abs_path.relative_to(Path.cwd())
+                except ValueError:
+                    header_path = abs_path
+                header = f"# FILEPATH: {header_path}\n"
+                total_size += len(header) + 2
+                continue
             else:
-                content = raw_content
+                # Fallback: read file directly (normal mode or no expanded content)
+                # Only strip leading comments from Python files (shebang/license)
+                try:
+                    raw_content = fp.read_text(encoding="utf-8")
+                    if fp.suffix == ".py":
+                        content = re.sub(r"^(?:#.*\n)+", "", raw_content)
+                    else:
+                        content = raw_content
+                except Exception:
+                    content = ""
+
+        try:
+            header_path = abs_path.relative_to(Path.cwd())
+        except ValueError:
+            header_path = abs_path
+        header = f"# FILEPATH: {header_path}\n"
         total_size += len(header) + len(content) + 2
 
     # Size of diffs
@@ -1079,10 +1101,18 @@ def calculate_context_size(
         total_size += len(diff)
 
     # If include_expanded_files, calculate the size of expanded model locations
-    # that the LLM will need to read separately
+    # that the LLM will need to read separately.
+    # BUT only if content was actually skipped (expanded_shrink_level == "none")
+    # Otherwise, the shrunk content is already included in the dump.
     if include_expanded_files:
-        expanded_files_size = _calculate_expanded_files_size(context)
-        total_size += expanded_files_size
+        # Check if any files actually had content skipped
+        has_skipped_content = any(
+            info.get("content_skipped", False)
+            for info in context.shrunken_files_info.values()
+        )
+        if has_skipped_content:
+            expanded_files_size = _calculate_expanded_files_size(context)
+            total_size += expanded_files_size
 
     return total_size
 
@@ -1093,11 +1123,20 @@ def _calculate_expanded_files_size(context: AkaidooContext) -> int:
 
     This is needed in agent mode where expanded models are NOT included in the dump
     but the LLM is instructed to read them from the source files.
+
+    IMPORTANT: Only count files where content_skipped=True. If content was NOT skipped
+    (i.e., expanded content is included in the shrunk output), we should NOT add
+    the original source ranges - that would cause double-counting.
     """
     total_size = 0
     seen_ranges: set = set()  # Avoid double-counting overlapping ranges
 
     for fp, info in context.shrunken_files_info.items():
+        # Only count expanded locations if content was actually skipped
+        # (i.e., the expanded content is NOT in the dump and LLM needs to read it)
+        if not info.get("content_skipped", False):
+            continue
+
         locs = info.get("expanded_locations")
         if not locs:
             continue

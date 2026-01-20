@@ -128,7 +128,7 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
     "soft": {
         "T_EXP": "none",
         "T_OTH": "none",
-        "D_EXP": "none",  # Full content for expanded models in dependencies
+        "D_EXP": "none",
         "D_REL": "soft",
         "D_OTH": "max",
     },
@@ -136,8 +136,8 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
         "T_EXP": "none",
         "T_OTH": "soft",
         "D_EXP": "none",
-        "D_REL": "max",  # Related models → max shrink (keep skeleton)
-        "D_OTH": "prune",  # Other models → skip entirely
+        "D_REL": "max",
+        "D_OTH": "prune",
     },
     "hard": {
         "T_EXP": "none",

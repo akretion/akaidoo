@@ -1237,3 +1237,208 @@ def test_tree_view_shrunk_visualization(dummy_addons_env):
     assert "b_model.py" in result.stdout
     # File sizes should be shown
     assert "(35B)" in result.stdout or "(30B)" in result.stdout
+
+
+@pytest.fixture(scope="module")
+def odoo_models_env(tmp_path_factory):
+    """Create a test environment with proper Odoo model definitions for expand testing."""
+    base_path = tmp_path_factory.mktemp("odoo_models_env")
+    addons_path = base_path / "addons"
+    addons_path.mkdir()
+
+    # Target addon with models that will be auto-expanded
+    target_addon = addons_path / "target_addon"
+    target_addon.mkdir()
+    (target_addon / "__init__.py").write_text("from . import models\n")
+    (target_addon / "__manifest__.py").write_text(
+        "{'name': 'Target Addon', 'version': '16.0.1.0.0', 'depends': ['dep_addon'], 'installable': True}"
+    )
+    (target_addon / "models").mkdir()
+    (target_addon / "models" / "__init__.py").write_text(
+        "from . import sale_order\nfrom . import product\n"
+    )
+    # sale.order extension with enough fields/methods to trigger auto-expand
+    (target_addon / "models" / "sale_order.py").write_text("""
+from odoo import models, fields, api
+
+class SaleOrder(models.Model):
+    _inherit = 'sale.order'
+
+    custom_field1 = fields.Char(string="Custom 1")
+    custom_field2 = fields.Char(string="Custom 2")
+    custom_field3 = fields.Char(string="Custom 3")
+    custom_field4 = fields.Float(string="Custom 4")
+    custom_field5 = fields.Float(string="Custom 5")
+    custom_field6 = fields.Boolean(string="Custom 6")
+
+    @api.depends('custom_field1')
+    def _compute_something(self):
+        for rec in self:
+            rec.custom_field4 = 1.0
+
+    def action_custom_method(self):
+        return True
+
+    def another_method(self):
+        pass
+""")
+    # product.template extension (simpler)
+    (target_addon / "models" / "product.py").write_text("""
+from odoo import models, fields
+
+class ProductTemplate(models.Model):
+    _inherit = 'product.template'
+
+    extra_info = fields.Text(string="Extra Info")
+""")
+
+    # Dependency addon with base models
+    dep_addon = addons_path / "dep_addon"
+    dep_addon.mkdir()
+    (dep_addon / "__init__.py").write_text("from . import models\n")
+    (dep_addon / "__manifest__.py").write_text(
+        "{'name': 'Dep Addon', 'version': '16.0.1.0.0', 'depends': [], 'installable': True}"
+    )
+    (dep_addon / "models").mkdir()
+    (dep_addon / "models" / "__init__.py").write_text(
+        "from . import sale_order\nfrom . import product\n"
+    )
+    # Base sale.order model
+    (dep_addon / "models" / "sale_order.py").write_text("""
+from odoo import models, fields, api
+
+class SaleOrder(models.Model):
+    _name = 'sale.order'
+    _description = 'Sale Order'
+
+    name = fields.Char(string="Order Reference", required=True)
+    partner_id = fields.Many2one('res.partner', string="Customer")
+    order_line = fields.One2many('sale.order.line', 'order_id', string="Order Lines")
+    state = fields.Selection([
+        ('draft', 'Draft'),
+        ('confirm', 'Confirmed'),
+    ], default='draft')
+    amount_total = fields.Float(string="Total", compute='_compute_amount')
+
+    @api.depends('order_line')
+    def _compute_amount(self):
+        for order in self:
+            order.amount_total = sum(line.price for line in order.order_line)
+
+    def action_confirm(self):
+        self.write({'state': 'confirm'})
+        return True
+""")
+    # Base product.template model
+    (dep_addon / "models" / "product.py").write_text("""
+from odoo import models, fields
+
+class ProductTemplate(models.Model):
+    _name = 'product.template'
+    _description = 'Product Template'
+
+    name = fields.Char(string="Name", required=True)
+    description = fields.Text(string="Description")
+    list_price = fields.Float(string="Price")
+""")
+
+    odoo_conf = base_path / "odoo.conf"
+    odoo_conf.write_text(f"[options]\naddons_path = {addons_path}\n")
+
+    return {
+        "addons_path": addons_path,
+        "odoo_conf": odoo_conf,
+        "target_addon": target_addon,
+        "dep_addon": dep_addon,
+    }
+
+
+def test_agent_mode_token_consistency(odoo_models_env, tmp_path):
+    """Test that --agent mode produces similar token estimates to normal mode.
+
+    This is a regression test for the bug where agent mode was incorrectly
+    counting tokens (either double-counting or missing expanded model content).
+    """
+    base_args = [
+        "target_addon",
+        "-c",
+        str(odoo_models_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--shrink=soft",
+        "--auto-expand",
+    ]
+
+    # Run without --agent
+    normal_output = tmp_path / "normal.md"
+    normal_args = base_args + ["-o", str(normal_output)]
+    result_normal = _run_cli(normal_args, expected_exit_code=0)
+
+    # Run with --agent
+    agent_output = tmp_path / "agent.md"
+    agent_args = base_args + ["--agent", "-o", str(agent_output)]
+    result_agent = _run_cli(agent_args, expected_exit_code=0)
+
+    # Extract token estimates from output
+    def extract_tokens(output):
+        match = re.search(r"(\d+)k Tokens", output)
+        if match:
+            return int(match.group(1))
+        return None
+
+    normal_tokens = extract_tokens(result_normal.stdout)
+    agent_tokens = extract_tokens(result_agent.stdout)
+
+    assert normal_tokens is not None, "Could not extract token count from normal mode"
+    assert agent_tokens is not None, "Could not extract token count from agent mode"
+
+    # Token estimates should be within 5% of each other
+    # (small difference is expected due to header differences)
+    diff_percent = abs(normal_tokens - agent_tokens) / max(normal_tokens, 1) * 100
+    assert diff_percent < 5, (
+        f"Token estimates differ too much: normal={normal_tokens}k, agent={agent_tokens}k "
+        f"({diff_percent:.1f}% difference)"
+    )
+
+
+def test_agent_mode_file_count_consistency(odoo_models_env, tmp_path):
+    """Test that --agent mode includes the same number of files as normal mode."""
+    base_args = [
+        "target_addon",
+        "-c",
+        str(odoo_models_env["odoo_conf"]),
+        "--no-addons-path-from-import-odoo",
+        "--odoo-series",
+        "16.0",
+        "--shrink=soft",
+        "--auto-expand",
+    ]
+
+    # Run without --agent
+    normal_output = tmp_path / "normal.md"
+    normal_args = base_args + ["-o", str(normal_output)]
+    result_normal = _run_cli(normal_args, expected_exit_code=0)
+
+    # Run with --agent
+    agent_output = tmp_path / "agent.md"
+    agent_args = base_args + ["--agent", "-o", str(agent_output)]
+    result_agent = _run_cli(agent_args, expected_exit_code=0)
+
+    # Extract file counts
+    def extract_file_count(output):
+        match = re.search(r"Found (\d+) total files", output)
+        if match:
+            return int(match.group(1))
+        return None
+
+    normal_files = extract_file_count(result_normal.stdout)
+    agent_files = extract_file_count(result_agent.stdout)
+
+    assert normal_files is not None, "Could not extract file count from normal mode"
+    assert agent_files is not None, "Could not extract file count from agent mode"
+
+    # File counts should be identical
+    assert (
+        normal_files == agent_files
+    ), f"File counts differ: normal={normal_files}, agent={agent_files}"
