@@ -23,6 +23,7 @@ from .context import (
     resolve_akaidoo_context,
 )
 from .service import get_service
+from .banner import AKAIDOO_BANNER
 
 try:
     from importlib import metadata
@@ -38,8 +39,6 @@ try:
     __version__ = metadata.version("akaidoo")
 except metadata.PackageNotFoundError:
     __version__ = "0.0.0-dev"
-
-TOKEN_ESTIMATION_FACTOR = TOKEN_FACTOR  # Alias for backward compatibility
 
 
 def parse_context_budget(budget_str: Optional[str]) -> Optional[int]:
@@ -244,7 +243,7 @@ def process_and_output_files(
         print_list([str(p.resolve()) for p in sorted_file_paths], separator_char)
 
 
-akaidoo_app = typer.Typer(help="Akaidoo: Odoo Context Dumper for AI")
+akaidoo_app = typer.Typer(help="Akaidoo: win your Odoo AI context fight!")
 
 
 @akaidoo_app.command(name="init")
@@ -317,7 +316,7 @@ def global_callback(
         show_default=False,
     ),
 ):
-    """Akaidoo: Odoo Context Dumper for AI"""
+    """Akaidoo: win your Odoo AI context fight!"""
     pass
 
 
@@ -665,7 +664,7 @@ Conventions:
         )
 
     total_kb = total_chars / 1024
-    total_tokens = int(total_chars * TOKEN_ESTIMATION_FACTOR / 1000)
+    total_tokens = int(total_chars * TOKEN_FACTOR / 1000)
     threshold_chars = total_chars * 0.05
 
     def format_model_list(models_set: Set[str]) -> str:
@@ -681,7 +680,7 @@ Conventions:
         for m in sorted_models:
             m_chars = model_chars_map.get(m, 0)
             if m_chars > threshold_chars and m_chars > 0:
-                m_tokens = int(m_chars * TOKEN_ESTIMATION_FACTOR / 1000)
+                m_tokens = int(m_chars * TOKEN_FACTOR / 1000)
                 item_str = f"{m} ({m_tokens}k tokens)"
                 # Highlight large models in yellow
                 formatted_items.append(typer.style(item_str, fg=typer.colors.YELLOW))
@@ -975,8 +974,13 @@ def find_pr_commits_after_target(
 
 
 def cli_entry_point():
-    # Handle -o default value for session context
     args = sys.argv
+    if "--help" in args:
+        # Highlight Akretion in blue
+        blue_akretion = typer.style("Akretion", fg=typer.colors.BLUE)
+        print(AKAIDOO_BANNER.replace("Akretion", blue_akretion))
+
+    # Handle -o default value for session context
     if "-o" in args:
         idx = args.index("-o")
         # Check if -o is followed by a value (not an option and not empty)
@@ -996,7 +1000,7 @@ def cli_entry_point():
     ]:
         # Prepend 'addon' to sys.argv if not a known subcommand or global option
         sys.argv.insert(1, "addon")
-    akaidoo_app()
+    akaidoo_app(prog_name="akaidoo")
 
 
 if __name__ == "__main__":

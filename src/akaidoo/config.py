@@ -10,7 +10,6 @@ from typing import Dict, List, Tuple
 TOKEN_FACTOR = 0.27  # Empirical factor to estimate tokens from character count
 
 # --- Mode Definitions ---
-PRUNE_MODES: List[str] = ["none", "soft", "medium", "hard"]
 SHRINK_MODES: List[str] = ["none", "soft", "medium", "hard", "max"]
 
 # --- Framework Addons ---
