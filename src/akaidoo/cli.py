@@ -551,16 +551,17 @@ def akaidoo_command_entrypoint(
 
     cmd_call = shlex.join(sys.argv)
     if agent_mode:
-        introduction = """## ⚠️ METADATA & CONSTRAINTS
-*   **Purpose:** This file is a high-level map of the Odoo module structure, inheritance order, and data schema.
-*   **Constraint:** **ALL METHOD LOGIC IS REMOVED.**
-*   **Constraint:** You see `pass # shrunk` or `field = ... # shrunk` placeholders.
-*   **Instruction:** **DO NOT** try to guess or hallucinate the implementation details of methods found here.
-*   **Instruction:** Use this map ONLY to understand:
-    1.  **Inheritance:** Which model inherits which (e.g., `_inherit = ['mail.thread']`).
-    2.  **Relations:** How models link (e.g., `partner_id` links to `res.partner`).
-    3.  **Navigation:** Use the `# FILEPATH` tags found here to locate the file if you need to read the actual source code logic.
+        introduction = """# ODOO CONTEXT MAP (SECONDARY MODELS)
+
+## ⚠️ READING PROTOCOL
+1.  **LOW RESOLUTION:** This file contains **shrunken** versions of secondary models.
+2.  **PURPOSE:** Use this ONLY to understand fields, relations, and inheritance hierarchy.
+3.  **NO ACTION REQUIRED:** Do **NOT** attempt to `read_file` the original sources of these models unless explicitly instructed by a future user query (e.g., a traceback).
+4.  **ASSUME CORRECTNESS:** Assume the methods marked `# shrunk` function correctly. Do not investigate them yet.
+
+---
 """
+
     else:
         introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
 Context: The following is a codebase dump produced by the akaidoo CLI.
@@ -831,34 +832,41 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             )
         )
 
-        # 1. Project Structure
+        # 1. Project Structure (Global Map)
+        typer.echo(typer.style("\n## 1. GLOBAL ODOO MODULES DEPENDENCY MAP", bold=True))
         typer.echo(
-            typer.style("\n## 1. PROJECT STRUCTURE (Dependency Order)", bold=True)
+            "The following tree defines the execution order. Logic in lower modules overrides parents."
         )
-        typer.echo(
-            "The following tree defines the module inheritance order (Global Context)."
-        )
-        typer.echo("Logic in lower modules overrides logic in parent modules.")
         typer.echo("```text")
         typer.echo(tree_str)
         typer.echo("```")
 
-        # 2. Schema Map
-        typer.echo(typer.style("\n## 2. SCHEMA MAP", bold=True))
+        # 2. Background Context (Secondary Models)
+        # We explicitly label this as "Secondary" so the LLM knows it's just supporting data
         typer.echo(
-            "Use your 'read_file' tool to read the structural skeleton (fields/relations) mapped here:"
+            typer.style("\n## 2. SECONDARY CONTEXT (Schema & Relations)", bold=True)
         )
-        typer.echo(f"- Path: {output_file}")
+        typer.echo(f"**ACTION:** Use `read_file` to ingest ENTIRELY: `{output_file}`")
         typer.echo(
-            "  (Note: This file contains summarized Odoo models. It is only for understanding data structures and finding file paths.)"
+            "   *   Contains: Structural skeletons of dependencies and secondary models."
+        )
+        typer.echo(
+            "   *   **DO NOT EXPAND:** Do NOT try to read the full source of files found in this map yet!"
+        )
+        typer.echo(
+            "   *   **USE AS INDEX:** Only use these paths later if a specific traceback/query requires it."
         )
 
-        # 3. Logic & Source Code
+        # 3. Primary Context (The Focus)
+        # We clarify that THIS is the "Main" part the user cares about
         if locations_by_model:
-            typer.echo(typer.style("\n## 3. LOGIC & SOURCE CODE", bold=True))
             typer.echo(
-                "Use your 'read_file' tool to read the IMPLEMENTATION LOGIC in parallel from these specific ranges:"
+                typer.style("\n## 3. PRIMARY FOCUS (Logic & Implementation)", bold=True)
             )
+            typer.echo(
+                "**ACTION:** Use your `read_file` tool to ingest the following source code ranges IN PARALLEL."
+            )
+            typer.echo("These are the core models relevant to the current task.")
 
             for m in sorted(locations_by_model.keys()):
                 entries = locations_by_model[m]
