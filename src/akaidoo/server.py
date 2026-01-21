@@ -1,57 +1,111 @@
+"""
+Akaidoo MCP Server
+
+Provides MCP (Model Context Protocol) tools for AI agents to query Odoo codebases.
+Uses AkaidooService for all operations.
+"""
+
 from typing import List, Optional
 from pathlib import Path
 from fastmcp import FastMCP
-from .cli import resolve_akaidoo_context, get_akaidoo_context_dump
-from .tree import get_akaidoo_tree_string
+
+from .service import get_service
+from .config import TOKEN_FACTOR
 
 # Create an MCP server
 mcp = FastMCP("Akaidoo")
+
+# Get the service instance
+_service = get_service()
+
+
+@mcp.tool()
+def read_module_source(
+    addon: str,
+    shrink_mode: str = "soft",
+    expand_models: Optional[List[str]] = None,
+    add_expand_models: Optional[List[str]] = None,
+    context_budget_tokens: Optional[int] = None,
+) -> str:
+    """
+    Retrieves Odoo addon source code with intelligent context optimization.
+
+    QUICK START: Just provide the `addon` name - akaidoo handles the rest with smart defaults.
+
+    OPTIONS:
+    - `shrink_mode`: Controls code compression (default: "soft")
+      - "none": Full code, no shrinking
+      - "soft": Shrink dependencies only (recommended for most tasks)
+      - "medium": More aggressive shrinking
+      - "hard": Very aggressive shrinking
+      - "max": Maximum compression, structure only
+
+    - `expand_models`: EXPLICIT mode - ONLY expand these models (disables auto-expand)
+      Use for debugging specific models, e.g., ["account.move"] for a traceback
+
+    - `add_expand_models`: ADDITIVE mode - Add models to the auto-expand set
+      Use when you need more detail on related models, e.g., ["stock.picking"]
+
+    - `context_budget_tokens`: Target context size (e.g., 100000)
+      Akaidoo auto-escalates shrink modes to fit within budget
+
+    STRATEGY GUIDE:
+    1. **General exploration**: Just provide addon name with defaults
+    2. **Debugging traceback**: Use expand_models=["the.failing.model"]
+    3. **Need more context on a model**: Use add_expand_models=["related.model"]
+    4. **Context too large**: Use context_budget_tokens or increase shrink_mode
+    """
+    # Convert token budget to character budget
+    budget_chars = None
+    if context_budget_tokens is not None:
+        budget_chars = int(context_budget_tokens / TOKEN_FACTOR)
+
+    context = _service.resolve_context(
+        addon,
+        shrink_mode=shrink_mode,
+        expand_models_str=",".join(expand_models) if expand_models else None,
+        add_expand_str=",".join(add_expand_models) if add_expand_models else None,
+        context_budget=budget_chars,
+    )
+    introduction = f"MCP Dump for {addon}"
+    return _service.get_context_dump(context, introduction)
 
 
 @mcp.tool()
 def get_context_map(addon: str) -> str:
     """
-    Shows the dependency tree and file hints for an addon. ALWAYS call this first to orient yourself.
-    It helps you understand module relationships before reading any code.
+    Optional: Shows the dependency tree for an addon.
+
+    Call this if you need to understand module relationships before reading code.
+    For most tasks, you can skip this and go directly to `read_module_source`.
+
+    Returns a tree visualization showing:
+    - Direct and transitive dependencies
+    - File counts per addon
+    - Which files are shrunk vs expanded
     """
-    context = resolve_akaidoo_context(addon_name=addon)
-    tree_str = get_akaidoo_tree_string(
-        root_addon_names=context.selected_addon_names,
-        addons_set=context.addons_set,
-        addon_files_map=context.addon_files_map,
-        odoo_series=context.final_odoo_series,
-        excluded_addons=context.excluded_addons,
-        pruned_addons=context.pruned_addons,
-        use_ansi=False,  # Important for machine-readable output
-        shrunken_files_info=context.shrunken_files_info,
-    )
-    return tree_str
+    context = _service.resolve_context(addon)
+    return _service.get_tree_string(context, use_ansi=False)
 
 
 @mcp.tool()
-def read_source_code(
-    addon: str,
-    focus_models: Optional[List[str]] = None,
-    expand_models: Optional[List[str]] = None,
-) -> str:
+def get_context_summary(addon: str) -> dict:
     """
-    Retrieves Odoo source code. Use this AFTER looking at the map.
+    Get metrics about addon context without the full source dump.
 
-    STRATEGY GUIDE:
-    1. **General Coding/Migration:** If writing a new feature or migrating, just provide `addon`.
-       This gives you a broad view of the dependencies.
-    2. **Debugging/Tracebacks:** If you have a traceback error on `account.move`, pass `focus_models=['account.move']`.
-       This isolates the specific logic causing the crash while shrinking everything else.
-    3. **Targeted Expansion:** If you need to see the full definition of a related model,
-       pass `expand_models=['the.model.name']` to see its complete source across the dependency tree.
+    Use this to plan your context window before calling read_module_source.
+
+    Returns:
+        - addon_names: Target addons
+        - odoo_series: Detected Odoo version
+        - total_files: Number of files in context
+        - total_tokens: Estimated token count
+        - expand_models: Models that will be fully expanded
+        - effective_shrink_mode: Applied shrink level
+        - And more...
     """
-    context = resolve_akaidoo_context(
-        addon_name=addon,
-        focus_models_str=",".join(focus_models) if focus_models else None,
-        add_expand_str=",".join(expand_models) if expand_models else None,
-    )
-    introduction = f"MCP Dump for {addon}"
-    return get_akaidoo_context_dump(context, introduction)
+    context = _service.resolve_context(addon)
+    return _service.get_context_summary(context)
 
 
 @mcp.tool()
@@ -62,7 +116,14 @@ def ping() -> str:
 
 @mcp.resource("akaidoo://context/summary")
 def get_summary() -> str:
-    """Get the current Akaidoo session summary as a mission briefing."""
+    """
+    Get the current Akaidoo session summary.
+
+    Reads `.akaidoo/context/session.md` which is created by running:
+    `akaidoo <addon> --session`
+
+    This provides a mission briefing for the current development session.
+    """
     summary_path = Path(".akaidoo/context/session.md")
     if summary_path.exists():
         return summary_path.read_text()

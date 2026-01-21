@@ -1,8 +1,5 @@
-import ast
-import json
 import re
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 import shlex
@@ -11,35 +8,22 @@ import os
 from git import Repo, InvalidGitRepositoryError
 
 import typer
-from manifestoo_core.addons_set import AddonsSet
-from manifestoo_core.odoo_series import OdooSeries, detect_from_addons_set
-from manifestoo.addon_sorter import AddonSorterTopological
-from manifestoo.addons_path import AddonsPath as ManifestooAddonsPath
-from manifestoo.addons_selection import AddonsSelection
-from manifestoo.commands.list_depends import list_depends_command
+from manifestoo_core.odoo_series import OdooSeries
 from manifestoo import echo
 import manifestoo.echo as manifestoo_echo_module
-from manifestoo.exceptions import CycleErrorExit
-from manifestoo.utils import print_list, comma_split
+from manifestoo.utils import print_list
 
-from .shrinker import shrink_manifest
 from .utils import (
     get_odoo_model_stats,
     get_timestamp,
-    get_model_relations,
-    AUTO_EXPAND_THRESHOLD,
-)
-from .scanner import (
-    is_trivial_init_py,
-    scan_directory_files,
-    scan_addon_files,
 )
 from .tree import print_akaidoo_tree, get_akaidoo_tree_string
-
-TOKEN_ESTIMATION_FACTOR = 0.27
-
-PRUNE_MODES = ["none", "soft", "medium", "hard"]
-SHRINK_MODES = ["none", "soft", "medium", "hard"]
+from .config import TOKEN_FACTOR
+from .context import (
+    resolve_akaidoo_context,
+)
+from .service import get_service
+from .banner import AKAIDOO_BANNER
 
 try:
     from importlib import metadata
@@ -56,75 +40,42 @@ try:
 except metadata.PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
-FRAMEWORK_ADDONS = (
-    "base",
-    "web",
-    "web_editor",
-    "web_tour",
-    "portal",
-    "mail",
-    "digest",
-    "bus",
-    "auth_signup",
-    "base_setup",
-    "http_routing",
-    "utm",
-    "uom",
-    "product",
-)
 
-PARENT_CHILD_AUTO_EXPAND = True
-BLACKLIST_AUTO_EXPAND = [
-    "res.users",
-    "res.groups",
-    "res.company",
-    "res.partner",
-    "mail.thread",
-    "mail.activity.mixin",
-    "portal.mixin",
-    "ir.ui.view",
-    "ir.model",
-    "ir.model.fields",
-    "ir.model.data",
-    "ir.attachment",
-    "res.config.settings",
-    "utm.mixin",
-]
+def parse_context_budget(budget_str: Optional[str]) -> Optional[int]:
+    """
+    Parse a context budget string into character count.
 
-BLACKLIST_RELATION_EXPAND = [
-    "ir.attachment",
-    "mail.activity.mixin",
-    "mail.thread",
-    "portal.mixin",
-    "res.company",
-    "res.currency",
-    "res.partner",
-    "res.partner.bank",
-    "resource.calendar",
-    "resource.resource",
-    "sequence.mixin",
-    "uom.uom",
-    "utm.mixin",
-]
+    Supports formats:
+    - "100k" or "100K" -> 100,000 tokens -> ~370,000 chars (using TOKEN_FACTOR)
+    - "50000" -> 50,000 characters
 
-TOKEN_FACTOR = 0.27  # empiric factor to estimate how many token
+    Returns character count or None if no budget specified.
+    """
+    if not budget_str:
+        return None
 
+    budget_str = budget_str.strip().lower()
 
-@dataclass
-class AkaidooContext:
-    found_files_list: List[Path]
-    shrunken_files_content: Dict[Path, str]
-    shrunken_files_info: Dict[Path, Dict]
-    addon_files_map: Dict[str, List[Path]]
-    pruned_addons: Dict[str, str]
-    addons_set: AddonsSet
-    final_odoo_series: Optional[OdooSeries]
-    selected_addon_names: Set[str]
-    excluded_addons: Set[str]
-    expand_models_set: Set[str]
-    diffs: List[Dict]
-    enriched_additions: Set[str] = field(default_factory=set)
-    new_related: Set[str] = field(default_factory=set)
+    if budget_str.endswith("k"):
+        # Token count (e.g., "100k" = 100,000 tokens)
+        try:
+            tokens = int(budget_str[:-1]) * 1000
+            # Convert tokens to chars: chars = tokens / TOKEN_FACTOR
+            return int(tokens / TOKEN_FACTOR)
+        except ValueError:
+            echo.error(
+                f"Invalid budget format: {budget_str}. Use '100k' for tokens or '50000' for chars."
+            )
+            raise typer.Exit(1)
+    else:
+        # Character count
+        try:
+            return int(budget_str)
+        except ValueError:
+            echo.error(
+                f"Invalid budget format: {budget_str}. Use '100k' for tokens or '50000' for chars."
+            )
+            raise typer.Exit(1)
 
 
 def version_callback_for_run(value: bool):
@@ -292,780 +243,7 @@ def process_and_output_files(
         print_list([str(p.resolve()) for p in sorted_file_paths], separator_char)
 
 
-def scan_extra_scripts(
-    addon_name: str,
-    openupgrade_path: Optional[Path],
-    module_diff_path: Optional[Path],
-) -> List[Path]:
-    extra_files = []
-    if openupgrade_path:
-        ou_scripts_base_path = openupgrade_path / "openupgrade_scripts" / "scripts"
-        addon_ou_script_path = ou_scripts_base_path / addon_name
-        if addon_ou_script_path.is_dir():
-            echo.debug(
-                f"Scanning OpenUpgrade scripts in {addon_ou_script_path} "
-                f"for {addon_name}..."
-            )
-            for ou_file in addon_ou_script_path.rglob("*"):
-                if ou_file.is_file():
-                    extra_files.append(ou_file.resolve())
-        else:
-            echo.debug(
-                f"No OpenUpgrade script directory found for {addon_name} "
-                f"at {addon_ou_script_path}"
-            )
-
-    if module_diff_path:
-        addon_diff_path = module_diff_path / addon_name
-        if addon_diff_path.is_dir():
-            echo.debug(
-                f"Scanning module diff scripts in {addon_diff_path} "
-                f"for {addon_name}..."
-            )
-            for diff_file in addon_diff_path.rglob("*"):
-                if diff_file.is_file():
-                    extra_files.append(diff_file.resolve())
-        else:
-            echo.debug(
-                f"No addon diff directory found for {addon_name} at {addon_diff_path}"
-            )
-    return extra_files
-
-
-def expand_inputs(
-    addon_name_input: str,
-) -> tuple[Set[str], Set[Path], bool, Optional[Path]]:
-    """
-    Parses the input string to determine:
-    1. Target addon names (explicit or discovered from paths).
-    2. Implicit addons paths (directories containing the discovered addons).
-    3. Whether to force directory mode (if input is a single path ending in /).
-    4. The directory path for directory mode.
-    """
-    raw_inputs = comma_split(addon_name_input)
-    selected_addon_names = set()
-    implicit_addons_paths = set()
-
-    # Check for forced directory mode (Mode 1)
-    # If single input, is a directory, and ends with separator OR is not an addon
-    if len(raw_inputs) == 1:
-        path_str = raw_inputs[0]
-        potential_path = Path(path_str)
-        is_dir = potential_path.is_dir()
-        ends_with_sep = path_str.endswith(os.path.sep)
-        has_manifest = (potential_path / "__manifest__.py").is_file()
-
-        if is_dir and (ends_with_sep or not has_manifest):
-            # Special case: It's a directory scan request
-            # Unless it's a container of addons and user DID NOT force slash?
-            # User requirement: "akaidoo some_dir" -> concat content (recursively) if not an addon?
-            # But "project mode" says: "akaidoo ./custom_addons" -> select all addons inside.
-            # Conflict: ./custom_addons (container) vs ./some_dir (just files).
-            # Heuristic: If it contains addons (subdirs with manifests), treat as project mode.
-            # If forced with slash, treat as directory mode.
-
-            if ends_with_sep:
-                return set(), set(), True, potential_path
-
-            # Check if container
-            has_sub_addons = any(
-                (sub / "__manifest__.py").is_file()
-                for sub in potential_path.iterdir()
-                if sub.is_dir()
-            )
-            if not has_sub_addons:
-                return set(), set(), True, potential_path
-
-    # Project/Addon Mode (Mode 2)
-    for item in raw_inputs:
-        path = Path(item)
-        if path.is_dir():
-            # Case A: Path to an addon
-            if (path / "__manifest__.py").is_file():
-                # Addon found by path
-                # Use directory name as addon name (standard convention)
-                name = path.name
-                selected_addon_names.add(name)
-                implicit_addons_paths.add(path.parent.resolve())
-            else:
-                # Case B: Path to a container of addons
-                found_any = False
-                for sub in path.iterdir():
-                    if sub.is_dir() and (sub / "__manifest__.py").is_file():
-                        selected_addon_names.add(sub.name)
-                        found_any = True
-
-                if found_any:
-                    implicit_addons_paths.add(path.resolve())
-                else:
-                    # It's a directory path but not an addon and no addons inside?
-                    # Treat as simple name? Or warn?
-                    # If it was part of a comma list, assume user meant it as a name if no path found.
-                    # But path.is_dir() is true. So it's just a folder with no addons.
-                    # Ignore or warn. Let's ignore path expansion and treat as name?
-                    # No, if it exists as a dir, it shouldn't be treated as an addon name unless it IS one.
-                    # Let's assume user made a mistake or it's a weird input.
-                    # For now, if we found nothing, maybe just add it as a name fallback?
-                    if not found_any:
-                        selected_addon_names.add(item)
-        else:
-            # Simple name
-            selected_addon_names.add(item)
-
-    return selected_addon_names, implicit_addons_paths, False, None
-
-
-def resolve_addons_selection(
-    selected_addon_names: Set[str],
-    addons_set: AddonsSet,
-    excluded_addons: Set[str],
-) -> List[str]:
-    selection = AddonsSelection(selected_addon_names)
-    sorter = AddonSorterTopological()
-    try:
-        dependent_addons, missing = list_depends_command(
-            selection, addons_set, True, True, sorter
-        )
-    except CycleErrorExit:
-        raise typer.Exit(1)
-    if missing:
-        echo.warning(f"Missing dependencies: {', '.join(sorted(missing))}")
-
-    dependent_addons_list = list(dependent_addons)
-    echo.info(
-        f"{len(dependent_addons_list)} addons in dependency tree (incl. targets).",
-        bold=True,
-    )
-    if manifestoo_echo_module.verbosity >= 2:
-        echo.info("Dependency list: ", nl=False)
-        print_list(dependent_addons_list, ", ")
-
-    intermediate_target_addons = []
-    for dep_name in dependent_addons_list:
-        if dep_name not in excluded_addons:
-            intermediate_target_addons.append(dep_name)
-        elif manifestoo_echo_module.verbosity >= 1:
-            echo.info(f"Excluding addon: {dep_name}")
-    return intermediate_target_addons
-
-
-def resolve_addons_path(
-    addons_path_str: Optional[str],
-    addons_path_from_import_odoo: bool,
-    addons_path_python: str,
-    odoo_cfg: Optional[Path],
-) -> ManifestooAddonsPath:
-    m_addons_path = ManifestooAddonsPath()
-    if addons_path_str:
-        m_addons_path.extend_from_addons_path(addons_path_str)
-    if addons_path_from_import_odoo:
-        m_addons_path.extend_from_import_odoo(addons_path_python)
-    if odoo_cfg:
-        m_addons_path.extend_from_odoo_cfg(odoo_cfg)
-    elif (
-        os.environ.get("VIRTUAL_ENV")
-        and os.environ["VIRTUAL_ENV"].endswith("odoo")
-        and Path(os.environ["VIRTUAL_ENV"] + ".cfg").is_file()
-    ):
-        echo.debug(f"reading addons_path from {os.environ['VIRTUAL_ENV']}.cfg")
-        m_addons_path.extend_from_odoo_cfg(os.environ["VIRTUAL_ENV"] + ".cfg")
-    elif Path("/etc/odoo.cfg").is_file():
-        echo.debug("reading addons_path from /etc/odoo.cfg")
-        m_addons_path.extend_from_odoo_cfg("/etc/odoo.cfg")
-    return m_addons_path
-
-
-def resolve_akaidoo_context(
-    addon_name: str,
-    addons_path_str: Optional[str] = None,
-    addons_path_from_import_odoo: bool = True,
-    addons_path_python: str = sys.executable,
-    odoo_cfg: Optional[Path] = None,
-    odoo_series: Optional[OdooSeries] = None,
-    openupgrade_path: Optional[Path] = None,
-    module_diff_path: Optional[Path] = None,
-    migration_commits: bool = False,
-    include: Optional[str] = None,
-    exclude_addons_str: Optional[str] = None,
-    no_exclude_addons_str: Optional[str] = None,
-    shrink_mode: str = "none",
-    expand_models_str: Optional[str] = None,
-    auto_expand: bool = True,
-    focus_models_str: Optional[str] = None,
-    add_expand_str: Optional[str] = None,
-    rm_expand_str: Optional[str] = None,
-    prune_mode: str = "soft",
-) -> AkaidooContext:
-    found_files_list: List[Path] = []
-    addon_files_map: Dict[str, List[Path]] = {}
-    shrunken_files_content: Dict[Path, str] = {}
-    shrunken_files_info: Dict[Path, Dict] = {}
-    diffs = []
-    expand_models_set = set()
-
-    # Parse Includes
-    includes: Set[str] = {"model"}
-    if include:
-        raw_includes = {i.strip() for i in include.split(",")}
-        if "all" in raw_includes:
-            includes.update(
-                {
-                    "view",
-                    "wizard",
-                    "data",
-                    "report",
-                    "controller",
-                    "security",
-                    "static",
-                    "test",
-                }
-            )
-        else:
-            includes.update(raw_includes)
-
-    # Build exclusion list
-    # Start with the default framework addons
-    excluded_addons = set(FRAMEWORK_ADDONS)
-
-    # Add user-specified exclusions
-    if exclude_addons_str:
-        excluded_addons.update({a.strip() for a in exclude_addons_str.split(",")})
-
-    # Remove user-specified inclusions (overrides)
-    if no_exclude_addons_str:
-        excluded_addons.difference_update(
-            {a.strip() for a in no_exclude_addons_str.split(",")}
-        )
-
-    if expand_models_str:
-        expand_models_set = {m.strip() for m in expand_models_str.split(",")}
-
-    focus_models_set: set[str] = set()
-    add_expand_set: set[str] = set()
-    rm_expand_set: set[str] = set()
-
-    if rm_expand_str:
-        rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
-
-    # If focus models are provided, auto-expand is disabled automatically
-    if focus_models_str and auto_expand:
-        auto_expand = False
-
-    focus_modes_count = sum([bool(focus_models_str), bool(add_expand_str), auto_expand])
-    if focus_modes_count > 1:
-        focus_flags = [
-            name
-            for flag, name in [
-                (focus_models_str, "--focus-models"),
-                (add_expand_str, "--add-expand"),
-                (auto_expand, "--auto-expand"),
-            ]
-            if flag
-        ]
-        echo.error(
-            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
-            "Use either --focus-models, --add-expand, or --auto-expand."
-        )
-        raise typer.Exit(1)
-
-    if focus_models_str:
-        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
-        auto_expand = False
-        expand_models_set = focus_models_set.copy()
-    elif add_expand_str:
-        add_expand_set = {m.strip() for m in add_expand_str.split(",")}
-    elif auto_expand:
-        pass
-
-    # Apply rm_expand
-    if rm_expand_set:
-        expand_models_set = expand_models_set - rm_expand_set
-        if rm_expand_set and manifestoo_echo_module.verbosity >= 1:
-            echo.info(
-                f"Removed {len(rm_expand_set)} models from auto-expand set: {', '.join(sorted(rm_expand_set))}"
-            )
-
-    focus_models_set: set[str] = set()
-    add_expand_set: set[str] = set()
-
-    # If focus models are provided, auto-expand is disabled automatically
-    if focus_models_str and auto_expand:
-        auto_expand = False
-
-    focus_modes_count = sum([bool(focus_models_str), bool(add_expand_str), auto_expand])
-    if focus_modes_count > 1:
-        focus_flags = [
-            name
-            for flag, name in [
-                (focus_models_str, "--focus-models"),
-                (add_expand_str, "--add-expand"),
-                (auto_expand, "--auto-expand"),
-            ]
-            if flag
-        ]
-        echo.error(
-            f"Only one mode can be used at a time: {', '.join(focus_flags)}. "
-            "Use either --focus-models, --add-expand, or --auto-expand."
-        )
-        raise typer.Exit(1)
-
-    if focus_models_str:
-        focus_models_set = {m.strip() for m in focus_models_str.split(",")}
-        auto_expand = False
-        expand_models_set = focus_models_set.copy()
-    elif add_expand_str:
-        add_expand_set = {m.strip() for m in add_expand_str.split(",")}
-    elif auto_expand:
-        pass
-
-    # Expand inputs (Project Mode / Smart Path)
-    (
-        selected_addon_names,
-        implicit_addons_paths,
-        force_directory_mode,
-        directory_mode_path,
-    ) = expand_inputs(addon_name)
-
-    # Update Session Context Summary
-    if Path(".akaidoo/context").is_dir():
-        summary_path = Path(".akaidoo/context/summary.json")
-        try:
-            summary = {
-                "addons": sorted(list(selected_addon_names)),
-                "focus_models": sorted(list(focus_models_set))
-                if focus_models_set
-                else None,
-            }
-            summary_path.write_text(json.dumps(summary, indent=2))
-        except Exception as e:
-            echo.warning(f"Failed to update session summary: {e}")
-
-    # --- Mode 1: Directory Mode ---
-    if force_directory_mode and directory_mode_path:
-        echo.info(
-            f"Target '{directory_mode_path}' is a directory. Listing all files recursively.",
-            bold=True,
-        )
-        if not directory_mode_path.is_absolute():
-            directory_mode_path = directory_mode_path.resolve()
-            echo.debug(f"Resolved relative path to: {directory_mode_path}")
-
-        found_files_list = scan_directory_files(directory_mode_path)
-        echo.info(
-            f"Found {len(found_files_list)} files in directory {directory_mode_path}."
-        )
-
-        return AkaidooContext(
-            found_files_list=found_files_list,
-            shrunken_files_content=shrunken_files_content,
-            shrunken_files_info={},
-            addon_files_map={},
-            pruned_addons={},
-            addons_set=AddonsSet(),
-            final_odoo_series=None,
-            selected_addon_names=set(),
-            excluded_addons=set(),
-            expand_models_set=set(),
-            diffs=[],
-        )
-
-    # --- Mode 2: Odoo Addon Mode (Project Mode) ---
-    echo.info(
-        f"Target(s) '{', '.join(sorted(selected_addon_names))}' treated as Odoo addon name(s).",
-        bold=True,
-    )
-
-    m_addons_path = resolve_addons_path(
-        addons_path_str,
-        addons_path_from_import_odoo,
-        addons_path_python,
-        odoo_cfg,
-    )
-
-    # Add implicit paths discovered from arguments
-    if implicit_addons_paths:
-        m_addons_path.extend_from_addons_dirs(implicit_addons_paths)
-        echo.info(
-            f"Implicitly added addons paths: {', '.join(str(p) for p in implicit_addons_paths)}"
-        )
-
-    if not m_addons_path:
-        echo.error(
-            "Could not determine addons path for Odoo mode. "
-            "Please provide one via --addons-path or --odoo-cfg, or provide a path to an addon/container."
-        )
-        raise typer.Exit(1)
-
-    if m_addons_path:
-        echo.info(str(m_addons_path), bold_intro="Using Addons path: ")
-
-    addons_set = AddonsSet()
-    if m_addons_path:
-        addons_set.add_from_addons_dirs(m_addons_path)
-
-    if not addons_set:
-        echo.error("No addons found in the specified addons path(s) for Odoo mode.")
-        raise typer.Exit(1)
-
-    if addons_set:
-        echo.info(str(addons_set), bold_intro="Found Addons set: ")
-
-    final_odoo_series = odoo_series
-    if not final_odoo_series and addons_set:
-        detected_odoo_series = detect_from_addons_set(addons_set)
-        if len(detected_odoo_series) == 1:
-            final_odoo_series = detected_odoo_series.pop()
-
-    # Never exclude explicitly selected targets
-    excluded_addons.difference_update(selected_addon_names)
-
-    missing_addons = selected_addon_names - set(addons_set.keys())
-    if missing_addons:
-        echo.error(
-            f"Addon(s) '{', '.join(missing_addons)}' not found in configured Odoo addons paths. "
-            f"Available: {', '.join(sorted(addons_set)) or 'None'}"
-        )
-        raise typer.Exit(1)
-
-    intermediate_target_addons = resolve_addons_selection(
-        selected_addon_names, addons_set, excluded_addons
-    )
-
-    target_addon_names: List[str]
-    if prune_mode == "hard":
-        target_addon_names = [
-            addon
-            for addon in intermediate_target_addons
-            if addon in selected_addon_names
-        ]
-        if target_addon_names:
-            echo.info(
-                f"Focusing only on the target addon(s): {', '.join(target_addon_names)}",
-                bold=True,
-            )
-        else:
-            echo.warning(
-                f"Target addon(s) '{', '.join(selected_addon_names)}' excluded by other filters or dependencies. "
-                "No files processed."
-            )
-    else:
-        target_addon_names = intermediate_target_addons
-    echo.info(
-        f"Will scan files from {len(target_addon_names)} Odoo addons after all filters.",
-        bold=True,
-    )
-
-    # Initialize relevant_models as empty set for first pass
-    relevant_models: Set[str] = set()
-
-    # Auto-expand harvesting
-    if auto_expand:
-        # We need to scan the TARGET addons to find which models are significantly extended
-        # We use a set of names we explicitly selected OR detected as targets
-        harvest_targets = selected_addon_names
-        echo.debug(
-            f"Auto-expand: Scanning {len(harvest_targets)} target addon(s) for models with score >= {AUTO_EXPAND_THRESHOLD}"
-        )
-        for addon_name_to_harvest in harvest_targets:
-            addon_meta = addons_set.get(addon_name_to_harvest)
-            if not addon_meta:
-                continue
-
-            addon_dir = addon_meta.path.resolve()
-            dirs_to_scan = [
-                addon_dir / "models",
-                addon_dir / "wizard",
-                addon_dir / "wizards",
-            ]
-
-            for scan_dir in dirs_to_scan:
-                if not scan_dir.exists() or not scan_dir.is_dir():
-                    continue
-
-                echo.debug(
-                    f"Auto-expand: Harvesting from addon '{addon_name_to_harvest}' in {scan_dir}"
-                )
-                # Scan all .py files in directory
-                for py_file in scan_dir.rglob("*.py"):
-                    if not py_file.is_file() or "__pycache__" in py_file.parts:
-                        continue
-                    try:
-                        stats = get_odoo_model_stats(
-                            py_file.read_text(encoding="utf-8")
-                        )
-                        if manifestoo_echo_module.verbosity >= 1:
-                            echo.info(
-                                f"Auto-expand: Scanning {py_file.relative_to(addon_dir)}"
-                            )
-                        for model_name, info in stats.items():
-                            score = info.get("score", 0)
-                            if score >= AUTO_EXPAND_THRESHOLD:
-                                if model_name not in expand_models_set:
-                                    if model_name in BLACKLIST_AUTO_EXPAND:
-                                        if manifestoo_echo_module.verbosity >= 1:
-                                            echo.info(
-                                                f"Skipping model '{model_name}' - blacklisted from auto-expand"
-                                            )
-                                        continue
-                                    if manifestoo_echo_module.verbosity >= 1:
-                                        echo.info(
-                                            f"Auto-expanding model '{model_name}' (score: {score}, fields: {info['fields']}, methods: {info['methods']})"
-                                        )
-                                    expand_models_set.add(model_name)
-                            else:
-                                if manifestoo_echo_module.verbosity >= 1:
-                                    echo.info(
-                                        f"Skipping model '{model_name}' - score {score} below threshold {AUTO_EXPAND_THRESHOLD}"
-                                    )
-                    except Exception:
-                        continue
-        if manifestoo_echo_module.verbosity >= 1:
-            if expand_models_set:
-                echo.info(
-                    f"Auto-expanded {len(expand_models_set)} models: {', '.join(sorted(expand_models_set))}"
-                )
-            else:
-                echo.info("Auto-expand: No models met the threshold criteria.")
-    elif focus_models_set:
-        if manifestoo_echo_module.verbosity >= 1:
-            echo.info(
-                f"Focus mode: Expanding {len(focus_models_set)} specified models: {', '.join(sorted(focus_models_set))}"
-            )
-
-    if add_expand_set:
-        expand_models_set.update(add_expand_set)
-        if manifestoo_echo_module.verbosity >= 1:
-            echo.info(
-                f"Added {len(add_expand_set)} models to expand set: {', '.join(sorted(add_expand_set))}"
-            )
-
-    # --- Pass 1: Discovery (Build Model Map and Relations) ---
-    all_relations: Dict[str, Set[str]] = {}
-    addon_models: Dict[str, Set[str]] = {}
-    pruned_addons: Dict[str, str] = {}
-    all_discovered_models: Set[str] = set()
-
-    if target_addon_names:
-        discovery_scan_roots = ["models", ".", "wizard", "wizards"]
-
-        for addon_name_to_discover in target_addon_names:
-            addon_meta = addons_set.get(addon_name_to_discover)
-            if not addon_meta:
-                continue
-
-            addon_dir = addon_meta.path.resolve()
-            addon_models[addon_name_to_discover] = set()
-
-            for root_name in discovery_scan_roots:
-                scan_path_dir = addon_dir / root_name if root_name != "." else addon_dir
-                if not scan_path_dir.is_dir():
-                    continue
-
-                for py_file in scan_path_dir.rglob("*.py"):
-                    if (
-                        not py_file.is_file()
-                        or "__pycache__" in py_file.parts
-                        or is_trivial_init_py(py_file)
-                    ):
-                        continue
-                    try:
-                        content = py_file.read_text(encoding="utf-8")
-                        rels = get_model_relations(content)
-                        if rels:
-                            addon_models[addon_name_to_discover].update(rels.keys())
-                            all_discovered_models.update(rels.keys())
-                            for m, r_dict in rels.items():
-                                if m not in all_relations:
-                                    all_relations[m] = {
-                                        "parents": set(),
-                                        "comodels": set(),
-                                    }
-                                all_relations[m]["parents"].update(
-                                    r_dict.get("parents", set())
-                                )
-                                all_relations[m]["comodels"].update(
-                                    r_dict.get("comodels", set())
-                                )
-                    except Exception:
-                        continue
-
-    # --- Late Enrichment: Validate Parent/Child existence ---
-    enriched_additions = set()
-    if PARENT_CHILD_AUTO_EXPAND and expand_models_set:
-        potential_additions = set()
-        for m in list(expand_models_set):
-            if m.endswith(".line"):
-                parent = m[:-5]
-                if (
-                    parent
-                    and parent not in expand_models_set
-                    and parent not in BLACKLIST_AUTO_EXPAND
-                ):
-                    potential_additions.add(parent)
-            else:
-                child = f"{m}.line"
-                if (
-                    child not in expand_models_set
-                    and child not in BLACKLIST_AUTO_EXPAND
-                ):
-                    potential_additions.add(child)
-
-        for potential in potential_additions:
-            if potential in all_discovered_models:
-                enriched_additions.add(potential)
-
-        if enriched_additions:
-            expand_models_set.update(enriched_additions)
-
-    # --- Pass 2: Relationship Resolution & Relevant Models ---
-    related_models_set = set()
-    new_related = set()
-
-    # 1. Recursive Parent Expansion
-    # We want to fully expand models that are inherited by expanded models
-    queue = list(expand_models_set)
-    seen_expansion = set(expand_models_set)
-    while queue:
-        m = queue.pop(0)
-        if m in all_relations:
-            parents = all_relations[m].get("parents", set())
-            for p in parents:
-                if p not in seen_expansion and p not in BLACKLIST_AUTO_EXPAND:
-                    seen_expansion.add(p)
-                    expand_models_set.add(p)
-                    queue.append(p)
-
-    # 2. Comodel (Relation) Resolution
-    # Soft relations (Expanded + Parent/Child + Related) are useful for both soft/none prune
-    if prune_mode in ("soft", "none"):
-        for m in expand_models_set:
-            if m in all_relations:
-                comodels = all_relations[m].get("comodels", set())
-                # Filter neighbors by blacklist
-                filtered_neighbors = {
-                    n for n in comodels if n not in BLACKLIST_RELATION_EXPAND
-                }
-                related_models_set.update(filtered_neighbors)
-        new_related = related_models_set - expand_models_set
-
-    relevant_models = expand_models_set | related_models_set
-
-    # --- Pass 3: Action (Scanning, Shrinking and Filtering) ---
-    processed_addons_count = 0
-    for addon_to_scan_name in target_addon_names:
-        addon_meta = addons_set.get(addon_to_scan_name)
-        if addon_meta:
-            addon_dir = addon_meta.path.resolve()
-
-            # Pruning Decision
-            reason = None
-            if addon_to_scan_name in excluded_addons:
-                reason = "excluded"
-            elif prune_mode not in ("none", "hard"):
-                # Check if addon contains any relevant model (defined or extended)
-                if not (addon_models.get(addon_to_scan_name, set()) & relevant_models):
-                    reason = "no_relevant_models"
-
-            if reason:
-                pruned_addons[addon_to_scan_name] = reason
-                if manifestoo_echo_module.verbosity >= 1:
-                    echo.info(f"Pruning addon '{addon_to_scan_name}' ({reason})")
-
-            # Content Gathering
-            if addon_dir.parts[-1] not in FRAMEWORK_ADDONS:
-                manifest_path = addon_dir / "__manifest__.py"
-                found_files_list.append(manifest_path)
-
-                # Shrink manifest for dependencies
-                is_dependency = addon_to_scan_name not in selected_addon_names
-                if is_dependency and shrink_mode != "none":
-                    try:
-                        content = manifest_path.read_text(encoding="utf-8")
-                        shrunken = shrink_manifest(content, prune_mode=prune_mode)
-                        shrunken_files_content[manifest_path.resolve()] = shrunken
-                    except Exception as e:
-                        echo.warning(
-                            f"Failed to shrink manifest for {addon_to_scan_name}: {e}"
-                        )
-
-                if migration_commits and not str(addon_dir).endswith(
-                    f"/addons/{addon_to_scan_name}"
-                ):
-                    with open(manifest_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    manifest_dict = ast.literal_eval(content)
-                    serie = manifest_dict.get("version").split(".")[0]
-                    find_pr_commits_after_target(
-                        diffs, addon_dir.parent, addon_to_scan_name, serie
-                    )
-
-                if (addon_dir / "readme" / "DESCRIPTION.md").is_file():
-                    found_files_list.append(addon_dir / "readme" / "DESCRIPTION.md")
-                elif (addon_dir / "readme" / "DESCRIPTION.rst").is_file():
-                    found_files_list.append(addon_dir / "readme" / "DESCRIPTION.rst")
-                if (addon_dir / "readme" / "USAGE.md").is_file():
-                    found_files_list.append(addon_dir / "readme" / "USAGE.md")
-                elif (addon_dir / "readme" / "USAGE.rst").is_file():
-                    found_files_list.append(addon_dir / "readme" / "USAGE.rst")
-
-            processed_addons_count += 1
-            if manifestoo_echo_module.verbosity >= 3:
-                echo.info(
-                    f"Scanning {addon_dir} for Odoo addon {addon_to_scan_name}..."
-                )
-
-            # Files for the Tree (Always scanned, but we use the results differently)
-            addon_files = scan_addon_files(
-                addon_dir=addon_dir,
-                addon_name=addon_to_scan_name,
-                selected_addon_names=selected_addon_names,
-                includes=includes,
-                excluded_addons=excluded_addons if prune_mode != "none" else set(),
-                shrink_mode=shrink_mode,
-                expand_models_set=expand_models_set,
-                shrunken_files_content=shrunken_files_content,
-                relevant_models=relevant_models,
-                prune_mode=prune_mode,
-                shrunken_files_info=shrunken_files_info,
-            )
-            addon_files_map[addon_to_scan_name] = addon_files
-
-            # Files for the Dump (Filtered by pruning/exclusion)
-            if not reason:
-                for f in addon_files:
-                    if f not in found_files_list:
-                        found_files_list.append(f)
-        else:
-            echo.warning(
-                f"Odoo Addon '{addon_to_scan_name}' metadata not found, "
-                "skipping its Odoo file scan."
-            )
-
-        extra_scripts = scan_extra_scripts(
-            addon_to_scan_name, openupgrade_path, module_diff_path
-        )
-        for f in extra_scripts:
-            if f not in found_files_list:
-                found_files_list.append(f)
-
-    return AkaidooContext(
-        found_files_list=found_files_list,
-        shrunken_files_content=shrunken_files_content,
-        shrunken_files_info=shrunken_files_info,
-        addon_files_map=addon_files_map,
-        pruned_addons=pruned_addons,
-        addons_set=addons_set,
-        final_odoo_series=final_odoo_series,
-        selected_addon_names=selected_addon_names,
-        excluded_addons=excluded_addons,
-        expand_models_set=expand_models_set,
-        diffs=diffs,
-        enriched_additions=enriched_additions,
-        new_related=new_related,
-    )
-
-
-akaidoo_app = typer.Typer(help="Akaidoo: Odoo Context Dumper for AI")
+akaidoo_app = typer.Typer(help="Akaidoo: win your Odoo AI context fight!")
 
 
 @akaidoo_app.command(name="init")
@@ -1138,27 +316,8 @@ def global_callback(
         show_default=False,
     ),
 ):
-    """Akaidoo: Odoo Context Dumper for AI"""
+    """Akaidoo: win your Odoo AI context fight!"""
     pass
-
-
-def calculate_context_size(context: AkaidooContext) -> int:
-    """Calculate the total size of the context to be generated."""
-    total_size = 0
-    for fp in context.found_files_list:
-        try:
-            header_path = fp.resolve().relative_to(Path.cwd())
-        except ValueError:
-            header_path = fp.resolve()
-        header = f"# FILEPATH: {header_path}\n"
-        content = context.shrunken_files_content.get(
-            fp.resolve(),
-            re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
-        )
-        total_size += len(header) + len(content) + 2  # for newlines
-    for diff in context.diffs:
-        total_size += len(diff)
-    return total_size
 
 
 @akaidoo_app.command(name="addon")
@@ -1271,15 +430,8 @@ def akaidoo_command_entrypoint(
     shrink_mode: str = typer.Option(
         "soft",
         "--shrink",
-        help="Shrink mode: none (no shrink), soft (deps shrunk with 'pass # shrunk', targets full), medium (relevant: soft in deps/none in targets, irrelevant: hard everywhere), hard (all methods removed).",
+        help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), max (max shrink everywhere).",
         case_sensitive=False,
-    ),
-    expand_models_str: Optional[str] = typer.Option(
-        None,
-        "--expand",
-        "-E",
-        help="Comma-separated list of Odoo models to fully expand even when shrinking.",
-        show_default=False,
     ),
     rm_expand_str: Optional[str] = typer.Option(
         None,
@@ -1287,16 +439,11 @@ def akaidoo_command_entrypoint(
         help="Remove models from auto-expand set. Comma-separated list.",
         show_default=False,
     ),
-    auto_expand: bool = typer.Option(
-        True,
-        "--auto-expand/--no-auto-expand",
-        help="Automatically expand models significantly extended in target addons (score >= 7). Score: field=1, method=3, 10 lines=2.",
-    ),
-    focus_models_str: Optional[str] = typer.Option(
+    expand_models_str: Optional[str] = typer.Option(
         None,
-        "--focus-models",
-        "-F",
-        help="Only expand specific models (overrides auto-expand). Comma-separated list.",
+        "--expand",
+        "-E",
+        help="Only expand specific models (explicit mode, disables auto-expand). Comma-separated list.",
         show_default=False,
     ),
     add_expand_str: Optional[str] = typer.Option(
@@ -1329,11 +476,11 @@ def akaidoo_command_entrypoint(
         "--editor-cmd",
         help="Editor command (e.g., 'code -r'). Defaults to $VISUAL, $EDITOR, then 'nvim'.",
     ),
-    prune_mode: str = typer.Option(
-        "soft",
-        "--prune",
-        help="Prune mode: none (keep all), soft (expanded + parent/child + related), medium (expanded only), hard (target addons only).",
-        case_sensitive=False,
+    prune_methods_str: Optional[str] = typer.Option(
+        None,
+        "--prune-methods",
+        "-P",
+        help="Comma-separated list of methods to force prune (e.g. 'Model.method').",
     ),
     session: bool = typer.Option(
         False,
@@ -1341,11 +488,35 @@ def akaidoo_command_entrypoint(
         help="Create a session.md file with the context map and command.",
         show_default=False,
     ),
+    agent_mode: bool = typer.Option(
+        False,
+        "--agent",
+        help="Activate Agent Mode: separate background context and provide source reading instructions.",
+        show_default=False,
+    ),
+    context_budget: Optional[str] = typer.Option(
+        None,
+        "--context-budget",
+        "-B",
+        help="Target context size budget (e.g., '100k' for 100k tokens, '50000' for 50000 chars). Akaidoo will auto-escalate shrink modes to fit.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
     )
     echo.debug(f"Effective verbosity: {manifestoo_echo_module.verbosity}")
+
+    if agent_mode:
+        if not output_file:
+            output_file = Path(".akaidoo/context/background.md")
+
+    # When using --context-budget, default to output file if no output mode specified
+    if context_budget and not output_file and not clipboard and not edit_in_editor:
+        output_file = Path(".akaidoo/context/current.md")
+
+    # Parse context budget
+    budget_chars = parse_context_budget(context_budget)
 
     context = resolve_akaidoo_context(
         addon_name=addon_name,
@@ -1362,11 +533,11 @@ def akaidoo_command_entrypoint(
         no_exclude_addons_str=no_exclude_addons_str,
         shrink_mode=shrink_mode,
         expand_models_str=expand_models_str,
-        auto_expand=auto_expand,
-        focus_models_str=focus_models_str,
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
-        prune_mode=prune_mode,
+        prune_methods_str=prune_methods_str,
+        skip_expanded=agent_mode,
+        context_budget=budget_chars,
     )
 
     edit_mode = edit_in_editor
@@ -1379,17 +550,30 @@ def akaidoo_command_entrypoint(
         raise typer.Exit(1)
 
     cmd_call = shlex.join(sys.argv)
-    introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
+    if agent_mode:
+        introduction = """# ODOO CONTEXT MAP (SECONDARY MODELS)
+
+## ⚠️ READING PROTOCOL
+1.  **LOW RESOLUTION:** This file contains **shrunken** versions of secondary models.
+2.  **PURPOSE:** Use this ONLY to understand fields, relations, and inheritance hierarchy.
+3.  **NO ACTION REQUIRED:** Do **NOT** attempt to `read_file` the original sources of these models unless explicitly instructed by a future user query (e.g., a traceback).
+4.  **ASSUME CORRECTNESS:** Assume the methods marked `# shrunk` function correctly. Do not investigate them yet.
+
+---
+"""
+
+    else:
+        introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
 Context: The following is a codebase dump produced by the akaidoo CLI.
 Command: {cmd_call}
 Conventions:
 1. Files start with `# FILEPATH: [path]`.
 2. Some files were filtered out to save tokens; ask for them if you need."""
-    if shrink_mode != "none":
-        introduction += """
+        if shrink_mode != "none":
+            introduction += """
 3. `# shrunk` indicates code removed to save tokens; ask for full content if a specific logic flow is unclear."""
-    if shrink_mode == "hard":
-        introduction += """
+        if shrink_mode == "hard":
+            introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 
     edit_mode = edit_in_editor
@@ -1405,45 +589,83 @@ Conventions:
             addons_set=context.addons_set,
             addon_files_map=context.addon_files_map,
             odoo_series=context.final_odoo_series,
-            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            excluded_addons=set(),
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
         )
 
-    # Token and Size Summary (Calculate for reporting and ordering)
-    total_chars = 0
+    # Token and Size Summary (use pre-calculated context size for consistency)
+    # Build model_chars_map for per-model size attribution (display purposes)
     model_chars_map: Dict[str, int] = {}
 
     for f in context.found_files_list:
-        content = context.shrunken_files_content.get(f.resolve())
+        abs_path = f.resolve()
+        content = context.shrunken_files_content.get(abs_path)
+        info = context.shrunken_files_info.get(abs_path)
+
+        # For files with expanded_locations (agent mode), calculate size from source ranges
+        if info and info.get("expanded_locations"):
+            try:
+                file_content = f.read_text(encoding="utf-8")
+                lines = file_content.split("\n")
+                for model_name, ranges in info["expanded_locations"].items():
+                    for start_line, end_line, _ in ranges:
+                        start_idx = max(0, start_line - 1)
+                        end_idx = min(len(lines), end_line)
+                        range_content = "\n".join(lines[start_idx:end_idx])
+                        model_chars_map[model_name] = model_chars_map.get(
+                            model_name, 0
+                        ) + len(range_content)
+            except Exception:
+                pass
+
+        # For regular content (non-expanded models)
         if content is None:
             try:
                 content = f.read_text(encoding="utf-8")
             except Exception:
                 content = ""
 
-        file_size = len(content)
-        total_chars += file_size
+        file_size = len(content) if content else 0
 
-        # Attribute size to models defined in this file
-        if f.suffix == ".py":
+        # Attribute size to models defined in this file (for non-expanded content)
+        if f.suffix == ".py" and file_size > 0:
             try:
                 # We use the shrunken info if available, otherwise scan
-                info = context.shrunken_files_info.get(f.resolve())
-                if info and "models" in info:
+                if info and "model_shrink_levels" in info:
+                    # Only count models that are NOT in expanded_locations
+                    expanded_models = set(info.get("expanded_locations", {}).keys())
+                    models_in_file = [
+                        m
+                        for m in info["model_shrink_levels"].keys()
+                        if m not in expanded_models
+                    ]
+                elif info and "models" in info:
                     models_in_file = info["models"].keys()
                 else:
                     models_in_file = get_odoo_model_stats(content).keys()
 
                 if models_in_file:
-                    # Simple attribution: full file size to each model mentioned
+                    # Simple attribution: distribute file size among models
+                    per_model_size = (
+                        file_size // len(models_in_file) if models_in_file else 0
+                    )
                     for m in models_in_file:
-                        model_chars_map[m] = model_chars_map.get(m, 0) + file_size
+                        model_chars_map[m] = model_chars_map.get(m, 0) + per_model_size
             except Exception:
                 pass
 
+    # Use pre-calculated context size for consistency with budget enforcement
+    total_chars = context.context_size_chars
+    if total_chars == 0:
+        # Fallback if context_size_chars wasn't set (e.g., directory mode)
+        total_chars = sum(
+            len(context.shrunken_files_content.get(f.resolve(), "")) or f.stat().st_size
+            for f in context.found_files_list
+        )
+
     total_kb = total_chars / 1024
-    total_tokens = int(total_chars * TOKEN_ESTIMATION_FACTOR / 1000)
+    total_tokens = int(total_chars * TOKEN_FACTOR / 1000)
     threshold_chars = total_chars * 0.05
 
     def format_model_list(models_set: Set[str]) -> str:
@@ -1459,7 +681,7 @@ Conventions:
         for m in sorted_models:
             m_chars = model_chars_map.get(m, 0)
             if m_chars > threshold_chars and m_chars > 0:
-                m_tokens = int(m_chars * TOKEN_ESTIMATION_FACTOR / 1000)
+                m_tokens = int(m_chars * TOKEN_FACTOR / 1000)
                 item_str = f"{m} ({m_tokens}k tokens)"
                 # Highlight large models in yellow
                 formatted_items.append(typer.style(item_str, fg=typer.colors.YELLOW))
@@ -1510,7 +732,7 @@ Conventions:
             addons_set=context.addons_set,
             addon_files_map=context.addon_files_map,
             odoo_series=context.final_odoo_series,
-            excluded_addons=context.excluded_addons if prune_mode != "none" else set(),
+            excluded_addons=set(),
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
         )
@@ -1548,8 +770,10 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         subprocess.run(shlex.split(editor) + [str(f) for f in context.found_files_list])
 
     if output_file or clipboard:
-        dump = get_akaidoo_context_dump(context, introduction)
+        service = get_service()
+        dump = service.get_context_dump(context, introduction)
         if output_file:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(dump, encoding="utf-8")
             typer.echo(
                 typer.style(f"Codebase dump written to {output_file}", bold=True)
@@ -1561,43 +785,117 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             else:
                 echo.error("pyperclip not installed. Cannot copy to clipboard.")
 
+    if agent_mode:
+        locations_by_model = {}
+        for fp, info in context.shrunken_files_info.items():
+            # Only include expanded locations if content was actually skipped
+            # (i.e., the LLM needs to read the full source, not the shrunk version)
+            if not info.get("content_skipped", False):
+                continue
+            locs = info.get("expanded_locations")
+            if locs:
+                try:
+                    rel_path = fp.relative_to(Path.cwd())
+                except ValueError:
+                    rel_path = fp
+                for model_name, ranges in locs.items():
+                    if model_name not in locations_by_model:
+                        locations_by_model[model_name] = []
+                    for start, end, type_ in ranges:
+                        locations_by_model[model_name].append(
+                            {
+                                "path": str(rel_path),
+                                "start": start,
+                                "end": end,
+                                "type": type_,
+                            }
+                        )
 
-def get_akaidoo_context_dump(
-    context: AkaidooContext,
-    introduction: str,
-    focus_files: Optional[List[str]] = None,
-) -> str:
-    all_content = []
-    all_content.append(introduction)
+        # Generate dependency tree string (modules only, no files)
+        tree_str = get_akaidoo_tree_string(
+            root_addon_names=context.selected_addon_names,
+            addons_set=context.addons_set,
+            addon_files_map={},  # Empty to hide files
+            odoo_series=context.final_odoo_series,
+            excluded_addons=set(),
+            pruned_addons=context.pruned_addons,
+            shrunken_files_info=context.shrunken_files_info,
+            use_ansi=False,
+        )
 
-    sorted_files = sorted(context.found_files_list)
-    if focus_files:
-        filtered_files = []
-        for f in sorted_files:
-            f_str = str(f)
-            if any(focus in f_str for focus in focus_files):
-                filtered_files.append(f)
-        sorted_files = filtered_files
-
-    for fp in sorted_files:
-        try:
-            try:
-                header_path = fp.resolve().relative_to(Path.cwd())
-            except ValueError:
-                header_path = fp.resolve()
-            header = f"# FILEPATH: {header_path}\n"
-            content = context.shrunken_files_content.get(
-                fp.resolve(),
-                re.sub(r"^(?:#.*\n)+", "", fp.read_text(encoding="utf-8")),
+        typer.echo(
+            "\n"
+            + typer.style(
+                "--- AGENT INSTRUCTIONS (CONTEXT INGESTION) ---",
+                fg=typer.colors.CYAN,
+                bold=True,
             )
-            all_content.append(header + content)
-        except Exception:
-            continue
+        )
 
-    for diff in context.diffs:
-        all_content.append(diff)
+        # 1. Project Structure (Global Map)
+        typer.echo(typer.style("\n## 1. GLOBAL ODOO MODULES DEPENDENCY MAP", bold=True))
+        typer.echo(
+            "The following tree defines the execution order. Logic in lower modules overrides parents."
+        )
+        typer.echo("```text")
+        typer.echo(tree_str)
+        typer.echo("```")
 
-    return "\n\n".join(all_content)
+        # 2. Background Context (Secondary Models)
+        # We explicitly label this as "Secondary" so the LLM knows it's just supporting data
+        typer.echo(
+            typer.style("\n## 2. SECONDARY CONTEXT (Schema & Relations)", bold=True)
+        )
+        typer.echo(f"**ACTION:** Use `read_file` to ingest ENTIRELY: `{output_file}`")
+        typer.echo(
+            "   *   Contains: Structural skeletons of dependencies and secondary models."
+        )
+        typer.echo(
+            "   *   **DO NOT EXPAND:** Do NOT try to read the full source of files found in this map yet!"
+        )
+        typer.echo(
+            "   *   **USE AS INDEX:** Only use these paths later if a specific traceback/query requires it."
+        )
+
+        # 3. Primary Context (The Focus)
+        # We clarify that THIS is the "Main" part the user cares about
+        if locations_by_model:
+            typer.echo(
+                typer.style("\n## 3. PRIMARY FOCUS (Logic & Implementation)", bold=True)
+            )
+            typer.echo(
+                "**ACTION:** Use your `read_file` tool to ingest the following source code ranges IN PARALLEL."
+            )
+            typer.echo("These are the core models relevant to the current task.")
+
+            for m in sorted(locations_by_model.keys()):
+                entries = locations_by_model[m]
+                # Sort: Base first, then by path
+                entries.sort(
+                    key=lambda x: (
+                        0 if x["type"] == "Base" else 1,
+                        x["path"],
+                        x["start"],
+                    )
+                )
+
+                typer.echo(typer.style(f"\n## Model: {m}", bold=True))
+                typer.echo("| Type | Path | Range |")
+                typer.echo("| :--- | :--- | :--- |")
+
+                for entry in entries:
+                    start = entry["start"]
+                    if start < 20:
+                        start = 1
+                    typer.echo(
+                        f"| {entry['type']} | {entry['path']} | {start}-{entry['end']} |"
+                    )
+
+            typer.echo(
+                typer.style(
+                    "\n--- END INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True
+                )
+            )
 
 
 def find_pr_commits_after_target(
@@ -1684,8 +982,13 @@ def find_pr_commits_after_target(
 
 
 def cli_entry_point():
-    # Handle -o default value for session context
     args = sys.argv
+    if "--help" in args:
+        # Highlight Akretion in blue
+        blue_akretion = typer.style("Akretion", fg=typer.colors.BLUE)
+        print(AKAIDOO_BANNER.replace("Akretion", blue_akretion))
+
+    # Handle -o default value for session context
     if "-o" in args:
         idx = args.index("-o")
         # Check if -o is followed by a value (not an option and not empty)
@@ -1705,7 +1008,7 @@ def cli_entry_point():
     ]:
         # Prepend 'addon' to sys.argv if not a known subcommand or global option
         sys.argv.insert(1, "addon")
-    akaidoo_app()
+    akaidoo_app(prog_name="akaidoo")
 
 
 if __name__ == "__main__":

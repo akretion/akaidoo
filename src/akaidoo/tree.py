@@ -11,6 +11,22 @@ from .utils import get_file_odoo_models
 
 NodeKey = str
 
+# Shrink level display names and color heat map (hot→cold = full→shrunk)
+SHRINK_DISPLAY = {
+    "none": "full",
+    "soft": "soft",
+    "hard": "hard",
+    "max": "max",
+    "prune": "pruned",
+}
+SHRINK_COLORS = {
+    "none": ("red", True, False),  # Hot: bold red - full content stands out
+    "soft": ("yellow", False, False),  # Warm: yellow - lightly shrunk
+    "hard": ("cyan", False, False),  # Cool: cyan - heavily shrunk
+    "max": ("white", False, True),  # Cold: dim white - skeleton only
+    "prune": ("white", False, True),  # Hidden: dim white - skipped entirely
+}
+
 
 def format_size(size_bytes: int) -> str:
     """Formats file size in human readable string."""
@@ -154,11 +170,25 @@ class AkaidooNode:
                     is_shrunk = shrink_info is not None
 
                     is_aggressive = False
+                    shrink_level = None
                     expanded_models = set()
+                    model_shrink_levels = {}
+                    content_skipped = False
+                    expanded_locations = {}
 
                     if is_shrunk:
-                        is_aggressive = shrink_info.get("aggressive", False)
+                        shrink_level = shrink_info.get("shrink_level")
+                        # Support legacy 'aggressive' if present
+                        is_aggressive = shrink_info.get(
+                            "aggressive", False
+                        ) or shrink_level in (
+                            "hard",
+                            "max",
+                        )
                         expanded_models = shrink_info.get("expanded_models", set())
+                        model_shrink_levels = shrink_info.get("model_shrink_levels", {})
+                        content_skipped = shrink_info.get("content_skipped", False)
+                        expanded_locations = shrink_info.get("expanded_locations", {})
 
                     # If file is aggressively shrunk OR standard shrink with NO expanded models, dim the file line
                     dim_file = is_shrunk and (is_aggressive or not expanded_models)
@@ -169,31 +199,64 @@ class AkaidooNode:
                         dim=dim_file,
                     )
 
+                    # has_models = False
                     if f.suffix == ".py":
                         models = get_file_odoo_models(f)
                         if models:
+                            # has_models = True
                             _append(" [Models: ", nl=False, dim=True)
                             sorted_models = sorted(models)
                             for idx, m in enumerate(sorted_models):
                                 sep = ", " if idx < len(sorted_models) - 1 else ""
 
-                                # Styling for individual model
-                                if m in expanded_models:
-                                    # Expanded model in a shrunk file -> Highlight
-                                    _append(m, nl=False, fg="cyan", bold=True)
-                                elif is_shrunk:
-                                    # Shrunk model -> Dim
-                                    _append(m, nl=False, dim=True)
+                                # Get effective shrink level for this model
+                                effective_level = model_shrink_levels.get(
+                                    m, shrink_level
+                                )
+
+                                # Determine suffix for model based on shrink level and agent mode
+                                model_suffix = ""
+                                if content_skipped and m in expanded_models:
+                                    # Agent mode: show line range instead of shrink level
+                                    locs = expanded_locations.get(m, [])
+                                    if locs:
+                                        start, end, _ = locs[0]  # Use first location
+                                        model_suffix = f" ({start}-{end})"
                                 else:
-                                    # Normal file -> Normal
-                                    _append(m, nl=False)
+                                    # Use 4-level display: full, soft, hard, max
+                                    display_name = SHRINK_DISPLAY.get(
+                                        effective_level or "none", "full"
+                                    )
+                                    model_suffix = f" ({display_name})"
+
+                                # Styling: heat map colors (hot=full → cold=shrunk)
+                                fg_color, level_bold, level_dim = SHRINK_COLORS.get(
+                                    effective_level or "none", ("white", False, False)
+                                )
+
+                                if m in expanded_models:
+                                    # Expanded model -> use level color + bold
+                                    _append(m, nl=False, fg=fg_color, bold=True)
+                                    _append(model_suffix, nl=False, fg=fg_color)
+                                elif is_shrunk and effective_level not in (
+                                    None,
+                                    "none",
+                                ):
+                                    # Shrunk model -> use level color, apply dim for max
+                                    _append(m, nl=False, fg=fg_color, dim=level_dim)
+                                    _append(
+                                        model_suffix,
+                                        nl=False,
+                                        fg=fg_color,
+                                        dim=level_dim,
+                                    )
+                                else:
+                                    # Full content (none level) -> red/bold (hot)
+                                    _append(m, nl=False, fg="red", bold=level_bold)
+                                    _append(model_suffix, nl=False, fg="red")
 
                                 _append(sep, nl=False, dim=True)
                             _append("]", nl=False, dim=True)
-
-                    if is_shrunk:
-                        tag = " [shrunk (hard)]" if is_aggressive else " [shrunk]"
-                        _append(tag, nl=False, dim=True)
 
                     _append("")  # End line
 

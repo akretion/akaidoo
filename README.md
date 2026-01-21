@@ -2,7 +2,7 @@
   <img src="assets/akaidoo.png" alt="Akaidoo Logo" width="300"/>
 </p>
 
-<h1 align="center">Akaidoo - Odoo Context Dumper for AI</h1>
+<h1 align="center">Akaidoo: win your Odoo AI context fight!</h1>
 
 <p align="center">
   <a href="https://pypi.org/project/akaidoo/"><img src="https://img.shields.io/pypi/v/akaidoo.svg" alt="PyPI version"></a>
@@ -11,174 +11,340 @@
 </p>
 
 <p align="center">
-  <i>The "Context Map & Dump" Workflow for Odoo AI Agents.</i>
+  <i>The ultimate bridge between your Odoo codebase and Large Language Models.</i>
 </p>
 
 ---
 
-**Akaidoo** is the ultimate bridge between your Odoo codebase and Large Language Models
-(LLMs). It extends [manifestoo](https://github.com/acsone/manifestoo) to intelligently
-survey, filter, prune, and dump Odoo source code, providing highly optimized context for
-AI-driven development.
+**Akaidoo** extends [manifestoo](https://github.com/acsone/manifestoo) to intelligently
+survey, filter, and dump Odoo source code, providing highly optimized context for
+AI-driven development. It solves the critical problem of fitting relevant Odoo code into
+LLM context windows while preserving the information AI needs to help you.
 
-It is designed around a powerful **2-Stage Workflow**: first **Map** the context, then
-**Dump** it.
+## Quick Start
 
-## How Akaidoo Thinks: The Core Algorithm
+```bash
+# Install
+pip install akaidoo
 
-Akaidoo uses a multi-pass system to make intelligent decisions about what code to
-include and how to format it. Understanding this process is key to mastering its
-powerful features.
+# Survey your addon (shows dependency tree)
+akaidoo sale_stock -c odoo.conf
 
-### Pass 1: Discovery (Build the Knowledge Graph)
+# Dump context to clipboard (smart defaults)
+akaidoo sale_stock -c odoo.conf -x
 
-Before any action is taken, Akaidoo performs a comprehensive survey of the entire
-codebase (target addons + all dependencies).
+# Dump with budget constraint (auto-escalates shrink)
+akaidoo sale_stock -c odoo.conf -B 100k -o context.md
+```
 
-1.  **Scan All Python Files**: It quickly parses every `.py` file in the addons path.
-2.  **Map All Relations**: It builds a complete in-memory graph (`all_relations`) that
-    maps every Odoo model to its parents (`_inherit`, `_inherits`) and its comodels
-    (from `Many2one`, `One2many`, `Many2many` fields).
+## Core Concepts
 
-This initial pass solves the "chicken-and-egg" problem: to know which dependencies are
-relevant, you first need a complete map of all relationships.
+### The 2-Stage Workflow: Map, then Dump
 
-### Pass 2: Expansion (Define What's "Relevant")
+1. **Map**: Survey the codebase to understand scope and relationships
+2. **Dump**: Generate optimized context for your AI assistant
 
-Once the graph is built, Akaidoo determines the set of `relevant_models` that will guide
-the rest of the process.
+### How Akaidoo Thinks
 
-1.  **Initial Seed**: The process starts with a seed set of models from:
-    - `--auto-expand`: Models in target addons with a high "complexity score" (based on
-      number of fields, methods, and lines of code).
-    - `--focus-models` or `--expand`: Models you explicitly specify.
-2.  **Recursive Parent Expansion**: Akaidoo walks up the inheritance tree. If a model is
-    in the set, and it `_inherit`s another model (e.g., `portal.mixin`), then that
-    parent model is also added to the set of models to be expanded. This continues
-    recursively until all ancestors are included (unless they are in a blacklist).
-3.  **Child Enrichment**: It also looks for `*.line` models (e.g., `sale.order.line`)
-    and adds their parents to the expansion set, ensuring master-detail relationships
-    are complete.
-4.  **Neighbor Resolution**: Finally, it finds all **comodels** related to the
-    now-expanded set. These neighbors are considered "related" but are not themselves
-    fully expanded, providing a layer of context without pulling in unrelated modules.
+Akaidoo uses a multi-pass algorithm:
 
-### Pass 3: Action (Prune, Shrink, and Dump)
-
-With a clear definition of `relevant_models`, Akaidoo takes action:
-
-1.  **Pruning**: It iterates through each addon in the dependency tree and decides
-    whether to keep or discard it based on the `--prune` mode. In `soft` mode (the
-    default), any addon that contains a file defining a `relevant_model` is kept.
-2.  **Shrinking**: For each file in the final, pruned list, it applies the `--shrink`
-    logic:
-    - **Target addons are NEVER shrunk** (unless in `hard` mode). Your primary code is
-      always preserved.
-    - In dependencies, the shrinking is granular:
-      - Files with relevant models are shrunk `soft` (method bodies become
-        `pass # shrunk`).
-      - Files with irrelevant models are shrunk `hard` (methods are removed entirely,
-        along with comments and `help=` tags).
-3.  **Dumping**: The final, processed content is assembled with file path headers and
-    delivered to your clipboard, a file, or the editor.
-
-### Final Output: The Summary
-
-After the tree or dump, Akaidoo provides a summary to help you understand the context
-you've built:
-
-- **Model Lists**: `Auto-expanded`, `Enriched`, and `Other Related` models are listed,
-  sorted by their estimated token size.
-- **Token Highlighting**: Any model contributing more than 5% of the total token count
-  is highlighted in yellow, making it easy to spot and potentially exclude with
-  `--rm-expand`.
-- **Context Size**: A final estimate of the total size in KB and tokens.
-
----
-
-## 🎛️ Control Specifications
-
-### Shrink Modes (`--shrink`)
-
-_Controls the "Resolution" or level of detail._
-
-| Mode         | Target Addons | Relevant Dependency Models        | Irrelevant Dependency Models | Imports & Metadata |
-| :----------- | :------------ | :-------------------------------- | :--------------------------- | :----------------- |
-| **`none`**   | **Full Code** | **Full Code**                     | **Full Code**                | Kept               |
-| **`soft`**   | **Full Code** | _Shrunken_ (keeps method headers) | _Shrunken_                   | Kept               |
-| **`medium`** | **Full Code** | _Shrunken_                        | **Hard Shrunk**              | **Removed**        |
-| **`hard`**   | _Hard Shrunk_ | **Hard Shrunk**                   | **Hard Shrunk**              | **Removed**        |
-
-- **Shrunken**: Method bodies are replaced with `pass  # shrunk`.
-- **Hard Shrunk**: Method definitions are removed entirely. Comments and field `help`
-  attributes are also stripped.
-
-### Prune Modes (`--prune`)
-
-_Controls the "Framing" or scope of included addons._
-
-| Mode         | Scope          | Description                                                                                          | Use Case                                 |
-| :----------- | :------------- | :--------------------------------------------------------------------------------------------------- | :--------------------------------------- |
-| **`none`**   | **Wide Angle** | Includes **ALL** dependencies.                                                                       | Debugging obscure framework issues.      |
-| **`soft`**   | **Portrait**   | **Default.** Includes target addons + dependencies containing any `relevant_model`.                  | Most development tasks.                  |
-| **`medium`** | **Close-up**   | Includes target addons + dependencies containing only models from the initial auto-expand/focus set. | Focused work on specific business logic. |
-| **`hard`**   | **Macro**      | Includes **only** the Target Addons.                                                                 | Unit testing, independent module work.   |
-
-### Exclusion Logic
-
-_Removes "well-known" clutter to focus on your custom code._
-
-Akaidoo excludes a default list of stable framework modules (`base`, `web`, `mail`,
-etc.) that an LLM should already know well. This is a major token-saving feature.
-
-- Use `--exclude addon_name` to add to the exclusion list.
-- Use `--no-exclude addon_name` to force the inclusion of a default-excluded addon.
+1. **Discovery**: Scans all Python files to build a complete model relationship graph
+2. **Expansion**: Determines which models are "relevant" based on complexity scores
+3. **Action**: Shrinks code intelligently based on model category and relevance
 
 ## Usage Examples
 
-**1. The "Quick Survey" (Stage 1)** See what `sale_timesheet` pulls in:
+### Basic Operations
 
-```console
-akaidoo sale_timesheet -c odoo.conf
+```bash
+# Survey addon (tree view, no dump)
+akaidoo sale_stock -c odoo.conf
+
+# Dump to clipboard
+akaidoo sale_stock -c odoo.conf -x
+
+# Dump to file
+akaidoo sale_stock -c odoo.conf -o context.md
+
+# Open in editor
+akaidoo sale_stock -c odoo.conf -e
 ```
 
-**2. The "Focused Dump" (Stage 2)** Standard Context for `sale_timesheet`, shrinking
-dependencies, but keeping `project.task` fully expanded:
+### Controlling Expansion
 
-```console
-akaidoo sale_timesheet -c odoo.conf --expand project.task -x
+```bash
+# Auto-expand (default) - akaidoo picks high-score models
+akaidoo sale_stock -c odoo.conf -x
+
+# Explicit mode - ONLY expand specific models (disables auto-expand)
+akaidoo sale_stock -c odoo.conf -E sale.order,stock.picking -x
+
+# Additive mode - add models to auto-expand set
+akaidoo sale_stock -c odoo.conf --add-expand account.move -x
+
+# Remove from auto-expand set
+akaidoo sale_stock -c odoo.conf --rm-expand mail.thread -x
 ```
 
-**3. Open Models and Views in Editor** Open all relevant files (including views) in your
-editor:
+### Controlling Context Size
 
-```console
-akaidoo project -c odoo.conf --include view -e
+```bash
+# Set shrink level manually
+akaidoo sale_stock -c odoo.conf --shrink=hard -x
+
+# Budget mode - auto-escalate shrink to fit token budget
+akaidoo sale_stock -c odoo.conf -B 100k -o context.md
+
+# Max shrink - data model skeleton only
+akaidoo sale_stock -c odoo.conf --shrink=max -x
 ```
 
-**4. "High-Level Architecture"** See the data model and API surface of `account` without
-implementation details:
+### Advanced Usage
 
-```console
-akaidoo account -c odoo.conf --shrink hard -x
+```bash
+# Multiple addons
+akaidoo sale_stock,purchase_stock -c odoo.conf -x
+
+# Include views and wizards
+akaidoo sale_stock -c odoo.conf --include=view,wizard -x
+
+# Include OpenUpgrade migration scripts
+akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration.md
+
+# Prune specific large methods
+akaidoo sale_stock -c odoo.conf --prune-methods sale.order._compute_amounts -x
 ```
 
-**5. Migration Context** Gather code + migration scripts for an upgrade:
+## Shrink Modes
 
-```console
-akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration_context.txt
+The `--shrink` option controls how aggressively code is compressed:
+
+| Level                | Target Addons  | Dependency Addons          | Use Case            |
+| :------------------- | :------------- | :------------------------- | :------------------ |
+| **`none`**           | Full code      | Full code                  | Maximum detail      |
+| **`soft`** (default) | Full code      | Shrunk (methods -> `pass`) | General development |
+| **`medium`**         | Lightly shrunk | Heavily shrunk             | Moderate context    |
+| **`hard`**           | Shrunk         | Very shrunk                | Focused debugging   |
+| **`max`**            | Skeleton only  | Skeleton only              | Data model overview |
+
+### What Gets Shrunk?
+
+- **Full**: Complete code with all logic preserved
+- **Soft**: Method bodies replaced with `pass # shrunk`, signatures kept
+- **Hard**: Methods removed entirely, only fields and class structure
+- **Max**: Fields summarized, only relational fields to relevant models detailed
+
+## Expansion Options
+
+Akaidoo intelligently decides which models to show in full detail ("expand") vs shrink.
+
+### Auto-Expand (Default)
+
+By default, akaidoo scans your target addons and auto-expands models with high
+"complexity scores" (based on fields, methods, and lines of code).
+
+### Explicit Mode (`--expand` / `-E`)
+
+Use when you want ONLY specific models expanded. This **disables auto-expand**:
+
+```bash
+# Only expand sale.order - everything else gets shrunk
+akaidoo sale_stock -E sale.order -x
 ```
 
-**6. Include Everything** Include models, views, wizards, data, tests, etc.:
+**Use case**: Debugging a specific model, investigating a traceback.
 
-```console
-akaidoo my_module -c odoo.conf --include all
+### Additive Mode (`--add-expand`)
+
+Add models to the auto-expand set without disabling auto-expand:
+
+```bash
+# Auto-expand + also expand stock.move
+akaidoo sale_stock --add-expand stock.move -x
+```
+
+**Use case**: Need more context on a related model.
+
+### Remove from Expansion (`--rm-expand`)
+
+Remove noisy models from auto-expand set:
+
+```bash
+# Don't expand mail.thread even if it scores high
+akaidoo sale_stock --rm-expand mail.thread -x
+```
+
+## Agent Mode
+
+Agent mode (`--agent`) produces context optimized for AI agents that can read files
+directly. Instead of including full source in the dump, it provides:
+
+1. **Schema Map**: Summarized data model structure (fields, relations)
+2. **Read Instructions**: File paths and line ranges for the agent to read and use
+   context caching
+
+```bash
+akaidoo sale_stock -c odoo.conf --agent -o .akaidoo/context/background.md
+```
+
+### Output Structure
+
+```
+## 1. PROJECT STRUCTURE (Dependency Order)
+[Module tree showing inheritance order]
+
+## 2. SCHEMA MAP
+Path: .akaidoo/context/background.md
+(Summarized models - use for navigation, not implementation details)
+
+## 3. LOGIC & SOURCE CODE
+| Model | Type | Path | Range |
+| sale.order | Ext | addons/sale/models/sale.py | 45-320 |
+```
+
+**Use case**: AI coding assistants (Claude, Cursor) that have file reading capabilities.
+
+## MCP Server
+
+Akaidoo can run as a persistent
+[Model Context Protocol](https://modelcontextprotocol.io/) server, allowing AI agents to
+dynamically query your Odoo codebase.
+
+### Starting the Server
+
+```bash
+akaidoo serve
+```
+
+### Available Tools
+
+#### `read_module_source` (Primary)
+
+Retrieves Odoo addon source code with intelligent context optimization.
+
+```python
+read_module_source(
+    addon="sale_stock",                    # Required
+    shrink_mode="soft",                    # none/soft/medium/hard/max
+    expand_models=["sale.order"],          # Explicit mode (disables auto-expand)
+    add_expand_models=["stock.move"],      # Additive mode (works with auto-expand)
+    context_budget_tokens=100000,          # Auto-escalate shrink to fit
+)
+```
+
+#### `get_context_map` (Optional)
+
+Shows dependency tree before committing to full dump:
+
+```python
+get_context_map(addon="sale_stock")
+```
+
+#### `get_context_summary` (Optional)
+
+Returns metrics (token counts, expanded models) for planning:
+
+```python
+get_context_summary(addon="sale_stock")
+# Returns: {"total_tokens": 85000, "expand_models": ["sale.order"], ...}
+```
+
+### Integration Example (Claude Desktop)
+
+Add to your Claude Desktop config
+(`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "akaidoo": {
+      "command": "akaidoo",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+## Tree View
+
+When running without output flags, akaidoo shows a tree view with:
+
+- Module dependency structure
+- File sizes
+- Per-model shrink indicators with color coding:
+  - **Red (full)**: Complete code preserved
+  - **Yellow (soft)**: Method bodies shrunk
+  - **Cyan (hard)**: Only fields and API
+  - **Dim (max)**: Skeleton only
+
+```
+Module: sale_stock
+Path: addons/sale_stock
+├── models/sale_order.py (12KB) [Models: sale.order (full), stock.picking (soft)]
+├── models/stock_move.py (8KB) [Models: stock.move (hard)]
+│
+└── Module: sale
+    Path: addons/sale
+    ├── models/sale.py (45KB) [Models: sale.order (full)]
+```
+
+## Framework Exclusions
+
+By default, akaidoo excludes well-known framework addons that LLMs typically know:
+
+`base`, `web`, `web_editor`, `web_tour`, `portal`, `mail`, `digest`, `bus`,
+`auth_signup`, `base_setup`, `http_routing`, `utm`, `uom`, `product`
+
+```bash
+# Add to exclusion list
+akaidoo sale_stock --exclude my_addon -x
+
+# Force include a default-excluded addon
+akaidoo sale_stock --no-exclude mail -x
+```
+
+## Directory Mode
+
+Pass a directory path (with trailing `/`) to scan arbitrary directories:
+
+```bash
+# Scan directory recursively (not Odoo mode)
+akaidoo ./my_scripts/ -o dump.md
+```
+
+## Environment Variables
+
+| Variable                       | Purpose                          |
+| :----------------------------- | :------------------------------- |
+| `ODOO_RC` / `ODOO_CONFIG`      | Odoo configuration file path     |
+| `ODOO_VERSION` / `ODOO_SERIES` | Odoo version/series              |
+| `EDITOR` / `VISUAL`            | Default editor for `--edit` mode |
+
+## Installation
+
+```bash
+# Basic installation
+pip install akaidoo
+
+# With MCP server support
+pip install akaidoo[mcp]
+
+# Development installation
+pip install -e ".[test]"
 ```
 
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a PR on GitHub.
 
+```bash
+# Run tests
+pytest tests/
+
+# Run with verbose output
+pytest tests/ -v
+```
+
 ## License
 
-MIT License.
+MIT
