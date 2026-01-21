@@ -935,7 +935,6 @@ def test_auto_expand_high_score_model(auto_expand_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--auto-expand",
         "--shrink=soft",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
@@ -956,7 +955,6 @@ def test_auto_expand_implies_shrink(auto_expand_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--auto-expand",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
         "/tmp/test_auto_expand2.txt",
@@ -976,7 +974,6 @@ def test_auto_expand_with_explicit_expand(auto_expand_env):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--auto-expand",
         "--expand",
         "base.model",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
@@ -1016,7 +1013,6 @@ class VeryLowScoreModel(models.Model):
         "--no-addons-path-from-import-odoo",
         "--odoo-series",
         "16.0",
-        "--auto-expand",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
         "/tmp/test_auto_expand4.txt",
@@ -1095,7 +1091,6 @@ def test_no_pruning_logic_integrated(pruning_env):
         "target_addon",
         "--addons-path",
         str(pruning_env),
-        "--auto-expand",
     ]
     result = _run_cli(args, expected_exit_code=0)
 
@@ -1276,7 +1271,6 @@ def test_agent_mode_token_consistency(odoo_models_env, tmp_path):
         "--odoo-series",
         "16.0",
         "--shrink=soft",
-        "--auto-expand",
     ]
 
     # Run without --agent
@@ -1321,7 +1315,6 @@ def test_agent_mode_file_count_consistency(odoo_models_env, tmp_path):
         "--odoo-series",
         "16.0",
         "--shrink=soft",
-        "--auto-expand",
     ]
 
     # Run without --agent
