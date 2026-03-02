@@ -690,39 +690,42 @@ Conventions:
 
         return ", ".join(formatted_items)
 
-    # Detailed Expansion Reporting
-    # We show these always, as requested
-    typer.echo()  # Blank line after tree
-    original_auto_expanded = context.expand_models_set - context.enriched_additions
-    if original_auto_expanded:
-        label = typer.style(
-            f"Auto-expanded {len(original_auto_expanded)} models:", bold=True
-        )
-        typer.echo(f"{label} {format_model_list(original_auto_expanded)}")
+    if manifestoo_echo_module.verbosity > 0 or not agent_mode:
+        # Detailed Expansion Reporting
+        # We show these always, as requested
+        typer.echo()  # Blank line after tree
+        original_auto_expanded = context.expand_models_set - context.enriched_additions
+        if original_auto_expanded:
+            label = typer.style(
+                f"Auto-expanded {len(original_auto_expanded)} models:", bold=True
+            )
+            typer.echo(f"{label} {format_model_list(original_auto_expanded)}")
 
-    if context.enriched_additions:
-        label = typer.style(
-            f"Enriched parent/child models ({len(context.enriched_additions)}):",
-            bold=True,
-        )
-        typer.echo(f"{label} {format_model_list(context.enriched_additions)}")
+        if context.enriched_additions:
+            label = typer.style(
+                f"Enriched parent/child models ({len(context.enriched_additions)}):",
+                bold=True,
+            )
+            typer.echo(f"{label} {format_model_list(context.enriched_additions)}")
 
-    if context.new_related:
-        label = typer.style(
-            f"Other Related models (neighbors/parents) ({len(context.new_related)}):",
-            bold=True,
-        )
-        typer.echo(f"{label} {format_model_list(context.new_related)}")
+        if context.new_related:
+            label = typer.style(
+                f"Other Related models (neighbors/parents) ({len(context.new_related)}):",
+                bold=True,
+            )
+            typer.echo(f"{label} {format_model_list(context.new_related)}")
 
-    typer.echo(
-        typer.style(f"Found {len(context.found_files_list)} total files.", bold=True)
-    )
-    typer.echo(
-        typer.style(
-            f"Estimated context size: {total_kb:.2f} KB ({total_tokens}k Tokens)",
-            bold=True,
+        typer.echo(
+            typer.style(
+                f"Found {len(context.found_files_list)} total files.", bold=True
+            )
         )
-    )
+        typer.echo(
+            typer.style(
+                f"Estimated context size: {total_kb:.2f} KB ({total_tokens}k Tokens)",
+                bold=True,
+            )
+        )
 
     if session:
         session_path = Path(".akaidoo/context/session.md")
@@ -736,9 +739,9 @@ Conventions:
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
         )
-        session_content = f"""# Akaidoo Session: {', '.join(context.selected_addon_names)}
+        session_content = f"""# Akaidoo Session: {", ".join(context.selected_addon_names)}
 
-> **Command:** `{' '.join(sys.argv)}`
+> **Command:** `{" ".join(sys.argv)}`
 > **Timestamp:** {get_timestamp()}
 > **Odoo Series:** {context.final_odoo_series}
 
@@ -775,9 +778,10 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         if output_file:
             output_file.parent.mkdir(parents=True, exist_ok=True)
             output_file.write_text(dump, encoding="utf-8")
-            typer.echo(
-                typer.style(f"Codebase dump written to {output_file}", bold=True)
-            )
+            if not agent_mode:
+                typer.echo(
+                    typer.style(f"Codebase dump written to {output_file}", bold=True)
+                )
         if clipboard:
             if pyperclip:
                 pyperclip.copy(dump)
@@ -821,15 +825,6 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
             use_ansi=False,
-        )
-
-        typer.echo(
-            "\n"
-            + typer.style(
-                "--- AGENT INSTRUCTIONS (CONTEXT INGESTION) ---",
-                fg=typer.colors.CYAN,
-                bold=True,
-            )
         )
 
         # 1. Project Structure (Global Map)
@@ -890,12 +885,6 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                     typer.echo(
                         f"| {entry['type']} | {entry['path']} | {start}-{entry['end']} |"
                     )
-
-            typer.echo(
-                typer.style(
-                    "\n--- END INSTRUCTIONS ---", fg=typer.colors.CYAN, bold=True
-                )
-            )
 
 
 def find_pr_commits_after_target(
