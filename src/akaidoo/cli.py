@@ -821,7 +821,7 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             addons_set=context.addons_set,
             addon_files_map={},  # Empty to hide files
             odoo_series=context.final_odoo_series,
-            excluded_addons=set(),
+            excluded_addons=context.excluded_addons,
             pruned_addons=context.pruned_addons,
             shrunken_files_info=context.shrunken_files_info,
             use_ansi=False,
