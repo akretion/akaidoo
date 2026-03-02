@@ -1152,6 +1152,12 @@ def get_akaidoo_context_dump(
             # Get content from shrunken_files_content if available
             content = context.shrunken_files_content.get(fp.resolve())
             if content is None:
+                # In agent mode, files whose entire content was skipped
+                # (all classes are expanded models) should NOT be dumped here.
+                # They will be referenced via read_file instructions instead.
+                info = context.shrunken_files_info.get(fp.resolve(), {})
+                if info.get("content_skipped"):
+                    continue
                 # Fallback: read file directly
                 # Only strip leading comments from Python files (shebang/license)
                 raw_content = fp.read_text(encoding="utf-8")
