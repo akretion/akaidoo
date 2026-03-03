@@ -1280,7 +1280,7 @@ def test_agent_mode_token_consistency(odoo_models_env, tmp_path):
 
     # Run with --agent
     agent_output = tmp_path / "agent.md"
-    agent_args = base_args + ["--agent", "-o", str(agent_output)]
+    agent_args = base_args + ["--agent", "-V", "-o", str(agent_output)]
     result_agent = _run_cli(agent_args, expected_exit_code=0)
 
     # Extract token estimates from output
