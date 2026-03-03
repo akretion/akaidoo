@@ -91,6 +91,12 @@ BINARY_EXTS: Tuple[str, ...] = (
 # Maximum size for data files before truncation (20KB)
 MAX_DATA_FILE_SIZE = 20 * 1024
 
+# --- Agent Mode ---
+# Expanded model classes whose source range is <= this many lines are inlined
+# directly into background.md instead of being listed as read_file instructions.
+# This avoids a round-trip tool call for tiny extensions.
+AGENT_INLINE_THRESHOLD: int = 300
+
 # --- Budget Escalation Levels ---
 # Defines the progression of shrink_mode to try
 # when context exceeds budget. Each level is more aggressive than the previous.

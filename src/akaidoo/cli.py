@@ -18,7 +18,7 @@ from .utils import (
     get_timestamp,
 )
 from .tree import print_akaidoo_tree, get_akaidoo_tree_string
-from .config import TOKEN_FACTOR
+from .config import AGENT_INLINE_THRESHOLD, TOKEN_FACTOR
 from .context import (
     resolve_akaidoo_context,
 )
@@ -551,13 +551,15 @@ def akaidoo_command_entrypoint(
 
     cmd_call = shlex.join(sys.argv)
     if agent_mode:
-        introduction = """# ODOO CONTEXT MAP (SECONDARY MODELS)
-
-## ⚠️ READING PROTOCOL
-1.  **LOW RESOLUTION:** This file contains **shrunken** versions of secondary models.
-2.  **PURPOSE:** Use this ONLY to understand fields, relations, and inheritance hierarchy.
-3.  **NO ACTION REQUIRED:** Do **NOT** attempt to `read_file` the original sources of these models unless explicitly instructed by a future user query (e.g., a traceback).
-4.  **ASSUME CORRECTNESS:** Assume the methods marked `# shrunk` function correctly. Do not investigate them yet.
+        introduction = f"""Role: Senior Odoo Architect enforcing OCA standards.
+Context: Secondary context file produced by akaidoo in agent mode.
+Command: {cmd_call}
+Conventions:
+1. Files start with `# FILEPATH: [path]`.
+2. Some files were filtered out to save tokens; ask for them if you need.
+3. `# shrunk` indicates method bodies removed to save tokens; ask for full content if a specific logic flow is unclear.
+4. Model extensions <= {AGENT_INLINE_THRESHOLD} lines are inlined here at full resolution.
+5. Larger expanded models are NOT in this file; their source ranges are in the agent instructions you received alongside this file.
 
 ---
 """
@@ -827,6 +829,20 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             use_ansi=False,
         )
 
+        # 0. Preamble (role + conventions, mirrors the non-agent introduction)
+        typer.echo(
+            typer.style(
+                "Role: Senior Odoo Architect enforcing OCA standards.", bold=True
+            )
+        )
+        typer.echo(
+            f"Context: Agent-mode context produced by akaidoo. Command: `{cmd_call}`"
+        )
+        typer.echo(
+            "Conventions: files in the dependency map start with `# FILEPATH: [path]`. "
+            "`# shrunk` means method bodies were removed."
+        )
+
         # 1. Project Structure (Global Map)
         typer.echo(typer.style("\n## 1. GLOBAL ODOO MODULES DEPENDENCY MAP", bold=True))
         typer.echo(
@@ -837,19 +853,19 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
         typer.echo("```")
 
         # 2. Background Context (Secondary Models)
-        # We explicitly label this as "Secondary" so the LLM knows it's just supporting data
+        abs_output_file = output_file.resolve() if output_file else None
         typer.echo(
             typer.style("\n## 2. SECONDARY CONTEXT (Schema & Relations)", bold=True)
         )
-        typer.echo(f"**ACTION:** Use `read_file` to ingest ENTIRELY: `{output_file}`")
+        typer.echo(f"**ACTION:** Read this file in full: `{abs_output_file}`")
         typer.echo(
-            "   *   Contains: Structural skeletons of dependencies and secondary models."
+            "   *   Contains: shrunk skeletons of all dependency models "
+            "(field definitions, class signatures, inheritance). "
+            f"Small model extensions (<= {AGENT_INLINE_THRESHOLD} lines) are inlined here at full resolution."
         )
         typer.echo(
-            "   *   **DO NOT EXPAND:** Do NOT try to read the full source of files found in this map yet!"
-        )
-        typer.echo(
-            "   *   **USE AS INDEX:** Only use these paths later if a specific traceback/query requires it."
+            "   *   Use paths listed here only for targeted investigation when a "
+            "traceback or query requires it — do not pre-emptively read those files."
         )
 
         # 3. Primary Context (The Focus)

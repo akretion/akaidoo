@@ -217,6 +217,7 @@ def shrink_python_file(
     expanded_shrink_level: Optional[str] = None,
     related_shrink_level: Optional[str] = None,
     other_shrink_level: Optional[str] = None,
+    inline_threshold: Optional[int] = None,
 ) -> ShrinkResult:
     """
     Shrinks Python code from a file.
@@ -396,8 +397,18 @@ def shrink_python_file(
                     model_shrink_levels[m] = "none"  # Expanded = full content
 
                 if skip_expanded_content:
-                    any_content_skipped = True
-                    continue
+                    class_line_count = end_line - start_line + 1
+                    if inline_threshold is None or class_line_count > inline_threshold:
+                        # Class is large: skip from background.md, list as read_file
+                        any_content_skipped = True
+                        continue
+                    # Class is small enough: inline it in background.md and do NOT
+                    # add to expanded_locations (so no read_file entry is emitted)
+                    for m in model_names & expand_models:
+                        expanded_locations[m].pop()
+                        if not expanded_locations[m]:
+                            del expanded_locations[m]
+                    # Fall through to emit the full class text below
 
                 if odoo_models_count > 1:
                     if current_model_index == 1:
@@ -444,8 +455,19 @@ def shrink_python_file(
                     # If expanded_shrink_level != "none", the content is shrunk and small,
                     # so we should include it rather than having the agent read full source
                     if skip_expanded_content and expanded_shrink_level == "none":
-                        any_content_skipped = True
-                        continue
+                        class_line_count = end_line - start_line + 1
+                        if (
+                            inline_threshold is None
+                            or class_line_count > inline_threshold
+                        ):
+                            any_content_skipped = True
+                            continue
+                        # Small enough: inline it; remove the location entry so no
+                        # read_file instruction is emitted for this class
+                        for m in model_names & expand_models:
+                            expanded_locations[m].pop()
+                            if not expanded_locations[m]:
+                                del expanded_locations[m]
 
                 # Track shrink level for non-expanded models in this class
                 # Each model gets its own level based on category
