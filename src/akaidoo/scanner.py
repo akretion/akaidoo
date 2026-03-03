@@ -5,7 +5,12 @@ import manifestoo.echo as manifestoo_echo_module
 from .shrinker import shrink_python_file
 from .types import ScanResult
 from .utils import get_file_odoo_models
-from .config import BINARY_EXTS, SHRINK_MATRIX, MAX_DATA_FILE_SIZE
+from .config import (
+    AGENT_INLINE_THRESHOLD,
+    BINARY_EXTS,
+    SHRINK_MATRIX,
+    MAX_DATA_FILE_SIZE,
+)
 
 
 def is_trivial_init_py(file_path: Path) -> bool:
@@ -293,6 +298,9 @@ def scan_addon_files(
                                 expanded_shrink_level=expanded_shrink_level,
                                 related_shrink_level=related_shrink_level,
                                 other_shrink_level=other_shrink_level,
+                                inline_threshold=AGENT_INLINE_THRESHOLD
+                                if skip_expanded
+                                else None,
                             )
 
                             has_content = bool(shrink_result.content.strip())
