@@ -157,3 +157,56 @@ SHRINK_MATRIX: Dict[str, Dict[str, str]] = {
         "D_OTH": "prune",
     },
 }
+
+# --- Compress-for-Prompt (2-Pass Workflow) ---
+# Default LLM model for the compression pass (litellm provider/model string).
+# Override with AKAIDOO_COMPRESS_MODEL env var.
+COMPRESS_DEFAULT_MODEL: str = "gemini/gemini-3.0-flash"
+
+# System prompt template for the compression LLM.
+# {task} is replaced with the user's task description.
+# {context} is replaced with the full Pass 1 context dump.
+COMPRESS_SYSTEM_PROMPT: str = """\
+You are an expert Odoo developer assistant. You are given a large Odoo codebase \
+context dump and a developer task. Your job is to recommend akaidoo CLI filter \
+options that will reduce the context to only what is relevant for the task.
+
+The goal is to achieve a 2x-3x reduction in context size while keeping everything \
+the developer needs to accomplish their task. Be aggressive in pruning irrelevant \
+modules and models, but NEVER remove something the developer will need.
+
+You MUST output ONLY a valid JSON object with these fields (all optional, omit \
+fields you don't want to change):
+
+{
+  "reasoning": "Brief explanation of your filtering decisions",
+  "exclude_addons": ["addon1", "addon2"],
+  "rm_expand": ["model.name1", "model.name2"],
+  "expand": ["model.name1", "model.name2"],
+  "prune_methods": ["model.name.method_name"],
+  "shrink": "soft"
+}
+
+Rules:
+- "exclude_addons": addons to EXCLUDE from the dependency tree. Only exclude addons \
+whose code is clearly irrelevant to the task. NEVER exclude the target addon(s) or \
+addons containing models directly referenced in the task.
+- "rm_expand": models to REMOVE from the auto-expand set. These models will be \
+shrunk instead of shown in full. Use this for models that were auto-expanded but \
+are not relevant to the task.
+- "expand": explicit list of models to expand (REPLACES auto-expand). Use this \
+only if you want to be very selective. If you use this, ONLY these models will be \
+expanded. Prefer "rm_expand" for surgical removal.
+- "prune_methods": specific methods to prune in format "model.name.method_name". \
+Use for large methods that are clearly not relevant. Be conservative here - the \
+developer may need to trace call paths.
+- "shrink": overall shrink level. One of: "none", "soft", "medium", "hard", "max". \
+Only change if the context is still too large after other filters.
+- "reasoning": briefly explain WHY you chose these filters.
+
+IMPORTANT:
+- Do NOT use both "expand" and "rm_expand" - pick one approach.
+- Prefer "rm_expand" (subtractive) over "expand" (explicit) for safety.
+- When in doubt, keep a model/addon rather than removing it.
+- The developer task description is the primary guide for relevance.
+"""
