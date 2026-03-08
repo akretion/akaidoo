@@ -203,6 +203,71 @@ def _get_field_info(node, code_bytes: bytes) -> Dict:
     return info
 
 
+def _parse_expand_methods_map(expand_methods: Set[str]) -> Dict[str, Set[str]]:
+    """Parse `model.method` selectors into a model -> method names map."""
+    mapped: Dict[str, Set[str]] = {}
+    for item in expand_methods:
+        token = item.strip()
+        if not token or "." not in token:
+            continue
+        model_name, method_name = token.rsplit(".", 1)
+        if not model_name or not method_name:
+            continue
+        mapped.setdefault(model_name, set()).add(method_name)
+    return mapped
+
+
+def _collect_called_methods(function_text: str) -> Set[str]:
+    """Extract likely intra-class method calls from a function body."""
+    calls = set(re.findall(r"\bself\.([A-Za-z_][A-Za-z0-9_]*)\s*\(", function_text))
+    calls.update(re.findall(r"\b(?:super\(\)\.)([A-Za-z_][A-Za-z0-9_]*)\s*\(", function_text))
+    return calls
+
+
+def _compute_method_expansion_closure(
+    class_node,
+    code_bytes: bytes,
+    seed_methods: Set[str],
+) -> Set[str]:
+    """Expand selected methods transitively through same-class calls."""
+    if not seed_methods:
+        return set()
+
+    body_node = class_node.child_by_field_name("body")
+    if not body_node:
+        return set()
+
+    graph: Dict[str, Set[str]] = {}
+    for child in body_node.children:
+        func_def = None
+        if child.type == "function_definition":
+            func_def = child
+        elif child.type == "decorated_definition":
+            definition = child.child_by_field_name("definition")
+            if definition and definition.type == "function_definition":
+                func_def = definition
+        if not func_def:
+            continue
+
+        name_node = func_def.child_by_field_name("name")
+        if not name_node:
+            continue
+        method_name = code_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
+        fn_text = code_bytes[child.start_byte : child.end_byte].decode("utf-8")
+        graph[method_name] = _collect_called_methods(fn_text)
+
+    closure = set(seed_methods)
+    stack = list(seed_methods)
+    while stack:
+        current = stack.pop()
+        for called in graph.get(current, set()):
+            if called in graph and called not in closure:
+                closure.add(called)
+                stack.append(called)
+
+    return closure
+
+
 def shrink_python_file(
     path: str,
     aggressive: bool = False,
@@ -212,6 +277,7 @@ def shrink_python_file(
     shrink_level: Optional[str] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_methods: Optional[Set[str]] = None,
+    expand_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
     skip_expanded_content: bool = False,
     expanded_shrink_level: Optional[str] = None,
@@ -246,7 +312,7 @@ def shrink_python_file(
     # If prune_methods is set, we MUST parse.
     # If header_path is set (implies we want context navigation), we MUST parse.
     # So basically always parse unless simple 'none' with no extras.
-    if shrink_level == "none" and not prune_methods and not skip_expanded_content:
+    if shrink_level == "none" and not prune_methods and not expand_methods and not skip_expanded_content:
         # But wait, header logic is inside loop. If we skip parsing, we miss headers.
         # Assuming we always want context headers if header_path is provided.
         if not header_path:
@@ -261,6 +327,8 @@ def shrink_python_file(
     expand_models = expand_models or set()
     relevant_models = relevant_models or set()
     prune_methods = prune_methods or set()
+    expand_methods = expand_methods or set()
+    expand_methods_map = _parse_expand_methods_map(expand_methods)
     actually_expanded_models = set()
     expanded_locations: Dict[str, List[Tuple[int, int, str]]] = {}
     model_shrink_levels: Dict[str, str] = {}  # Track effective shrink level per model
@@ -289,7 +357,11 @@ def shrink_python_file(
         return line.strip()
 
     def process_function(
-        node, indent="", context_models: Set[str] = None, override_level: str = None
+        node,
+        indent="",
+        context_models: Set[str] = None,
+        override_level: str = None,
+        expanded_method_names: Optional[Set[str]] = None,
     ):
         effective_level = override_level if override_level else shrink_level
 
@@ -301,21 +373,28 @@ def shrink_python_file(
             else:
                 return
 
+        func_name = None
+        func_name_node = func_def_node.child_by_field_name("name")
+        if func_name_node:
+            func_name = code_bytes[
+                func_name_node.start_byte : func_name_node.end_byte
+            ].decode("utf-8")
+
         should_prune_specifically = False
-        if context_models:
-            func_name_node = func_def_node.child_by_field_name("name")
-            if func_name_node:
-                func_name = code_bytes[
-                    func_name_node.start_byte : func_name_node.end_byte
-                ].decode("utf-8")
-                for m in context_models:
-                    if f"{m}.{func_name}" in prune_methods:
-                        should_prune_specifically = True
-                        break
+        should_expand_specifically = bool(
+            func_name and expanded_method_names and func_name in expanded_method_names
+        )
+
+        if context_models and func_name:
+            for m in context_models:
+                if f"{m}.{func_name}" in prune_methods:
+                    should_prune_specifically = True
+                    break
 
         if (
             effective_level in ("hard", "max", "prune")
             and not should_prune_specifically
+            and not should_expand_specifically
         ):
             return
 
@@ -334,7 +413,7 @@ def shrink_python_file(
             shrunken_parts.append(f"{indent}    pass  # pruned by request")
             return
 
-        if effective_level == "soft":
+        if effective_level == "soft" and not should_expand_specifically:
             for line in header_text.splitlines():
                 stripped_line = line.strip()
                 if stripped_line:
@@ -367,6 +446,13 @@ def shrink_python_file(
                 current_model_index += 1
 
             should_expand = any(m in expand_models for m in model_names)
+
+            selected_methods_for_class: Set[str] = set()
+            for model_name in model_names:
+                selected_methods_for_class.update(expand_methods_map.get(model_name, set()))
+            expanded_method_names = _compute_method_expansion_closure(
+                node, code_bytes, selected_methods_for_class
+            )
 
             has_pruned_methods = False
             for m in model_names:
@@ -591,6 +677,7 @@ def shrink_python_file(
                                 indent="    ",
                                 context_models=model_names,
                                 override_level=effective_level,
+                                expanded_method_names=expanded_method_names,
                             )
 
                     if effective_level == "max":
@@ -662,6 +749,12 @@ def main():
         help="Comma separated methods to prune (Model.method).",
     )
     cli_parser.add_argument(
+        "-M",
+        "--expand-methods",
+        type=str,
+        help="Comma separated methods to force expand (model.name._method).",
+    )
+    cli_parser.add_argument(
         "-H", "--header-path", type=str, help="File path for headers."
     )
     cli_parser.add_argument(
@@ -672,6 +765,9 @@ def main():
 
     expand_set = set(args.expand.split(",")) if args.expand else set()
     prune_set = set(args.prune_methods.split(",")) if args.prune_methods else set()
+    expand_set_methods = (
+        set(args.expand_methods.split(",")) if args.expand_methods else set()
+    )
 
     try:
         result = shrink_python_file(
@@ -680,6 +776,7 @@ def main():
             shrink_level=args.shrink_level,
             expand_models=expand_set,
             prune_methods=prune_set,
+            expand_methods=expand_set_methods,
             header_path=args.header_path,
             skip_expanded_content=args.skip_expanded,
         )

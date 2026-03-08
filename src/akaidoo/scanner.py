@@ -61,6 +61,7 @@ def scan_addon_files(
     expand_models_set: Optional[Set[str]] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_methods: Optional[Set[str]] = None,
+    expand_methods: Optional[Set[str]] = None,
     skip_expanded: bool = False,
 ) -> ScanResult:
     """
@@ -80,6 +81,7 @@ def scan_addon_files(
     relevant_models = relevant_models or set()
     excluded_addons = excluded_addons or set()
     prune_methods = prune_methods or set()
+    expand_methods = expand_methods or set()
 
     scan_roots: List[str] = []
     if "model" in includes:
@@ -293,6 +295,7 @@ def scan_addon_files(
                                 ),
                                 relevant_models=relevant_models,
                                 prune_methods=prune_methods,
+                                expand_methods=expand_methods,
                                 header_path=str(header_path),
                                 skip_expanded_content=skip_expanded,
                                 expanded_shrink_level=expanded_shrink_level,
