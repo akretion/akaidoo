@@ -113,6 +113,12 @@ akaidoo sale_stock -c odoo.conf -u ~/OpenUpgrade -o migration.md
 
 # Prune specific large methods
 akaidoo sale_stock -c odoo.conf --prune-methods sale.order._compute_amounts -x
+
+# Additively expand only key methods (and their same-class callees)
+akaidoo account -c odoo.conf --shrink=hard --expand-methods account.move._post,account.move.line._reconcile -x
+
+# Emit a planning prompt for a cheap long-context model (Gemini Flash, etc.)
+akaidoo account -c odoo.conf --agent --emit-compress-prompt --compress-task "Investigate invoice posting tax mismatch" -o .akaidoo/context/background.md
 ```
 
 ## Shrink Modes
@@ -203,6 +209,22 @@ Path: .akaidoo/context/background.md
 ```
 
 **Use case**: AI coding assistants (Claude, Cursor) that have file reading capabilities.
+
+
+### Two-Pass Compression Workflow (Cheap Planner LLM + Coding Agent)
+
+For very large contexts, use a cheap large-window model as a *planner* first, then run
+akaidoo again with the returned filters:
+
+1. Generate agent context with planning prompt:
+   `akaidoo account --agent --emit-compress-prompt --compress-task "..." -o .akaidoo/context/background.md`
+2. Ask the planner model to return JSON with `exclude_addons`, `rm_expand`,
+   `expand_models`, and `expand_methods`.
+3. Re-run akaidoo with those options, especially `--expand-methods` to keep large files
+   slim while preserving critical logic paths additively.
+
+`--expand-methods` is additive (it does not prune globally): only the selected methods
+and their same-class callees are expanded when shrinking is active.
 
 ## MCP Server
 

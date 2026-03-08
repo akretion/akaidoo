@@ -285,25 +285,29 @@ def _parse_expansion_options(
     add_expand_str: Optional[str],
     rm_expand_str: Optional[str],
     prune_methods_str: Optional[str],
+    expand_methods_str: Optional[str],
     auto_expand: bool,
-) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
+) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
     """
     Parse and validate expansion-related CLI options.
 
     Returns:
         (expand_models_set, focus_models_set, add_expand_set,
-         rm_expand_set, prune_methods_set, auto_expand)
+         rm_expand_set, prune_methods_set, expand_methods_set, auto_expand)
     """
     expand_models_set: Set[str] = set()
     focus_models_set: Set[str] = set()
     add_expand_set: Set[str] = set()
     rm_expand_set: Set[str] = set()
     prune_methods_set: Set[str] = set()
+    expand_methods_set: Set[str] = set()
 
     if rm_expand_str:
         rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
     if prune_methods_str:
-        prune_methods_set = {m.strip() for m in prune_methods_str.split(",")}
+        prune_methods_set = {m.strip() for m in prune_methods_str.split(",") if m.strip()}
+    if expand_methods_str:
+        expand_methods_set = {m.strip() for m in expand_methods_str.split(",") if m.strip()}
 
     if expand_models_str:
         # Explicit mode: disables auto-expand
@@ -321,6 +325,7 @@ def _parse_expansion_options(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        expand_methods_set,
         auto_expand,
     )
 
@@ -572,6 +577,7 @@ def resolve_akaidoo_context(
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
     prune_methods_str: Optional[str] = None,
+    expand_methods_str: Optional[str] = None,
     skip_expanded: bool = False,
     context_budget: Optional[int] = None,
 ) -> AkaidooContext:
@@ -603,12 +609,14 @@ def resolve_akaidoo_context(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        expand_methods_set,
         auto_expand,
     ) = _parse_expansion_options(
         expand_models_str,
         add_expand_str,
         rm_expand_str,
         prune_methods_str,
+        expand_methods_str,
         True,
     )
 
@@ -868,6 +876,7 @@ def resolve_akaidoo_context(
                 expand_models_set=expand_models_set,
                 relevant_models=relevant_models,
                 prune_methods=prune_methods_set,
+                expand_methods=expand_methods_set,
                 skip_expanded=skip_expanded,
             )
             # Merge scan results into the main collections
@@ -960,6 +969,7 @@ def resolve_akaidoo_context(
                 add_expand_str=add_expand_str,
                 rm_expand_str=rm_expand_str,
                 prune_methods_str=prune_methods_str,
+                expand_methods_str=expand_methods_str,
                 skip_expanded=skip_expanded,
                 context_budget=None,  # Don't recurse with budget
             )

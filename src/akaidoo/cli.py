@@ -482,6 +482,24 @@ def akaidoo_command_entrypoint(
         "-P",
         help="Comma-separated list of methods to force prune (e.g. 'Model.method').",
     ),
+    expand_methods_str: Optional[str] = typer.Option(
+        None,
+        "--expand-methods",
+        "-M",
+        help="Comma-separated list of methods to force expand additively (e.g. 'account.move._post'). Called methods in the same class are auto-expanded.",
+    ),
+    compress_task: Optional[str] = typer.Option(
+        None,
+        "--compress-task",
+        help="Task description used to generate a two-pass compression prompt for a cheap planning LLM.",
+        show_default=False,
+    ),
+    emit_compress_prompt: bool = typer.Option(
+        False,
+        "--emit-compress-prompt",
+        help="Print a JSON-oriented prompt template for a cheap LLM to suggest akaidoo filtering options.",
+        show_default=False,
+    ),
     session: bool = typer.Option(
         False,
         "--session",
@@ -536,6 +554,7 @@ def akaidoo_command_entrypoint(
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
         prune_methods_str=prune_methods_str,
+        expand_methods_str=expand_methods_str,
         skip_expanded=agent_mode,
         context_budget=budget_chars,
     )
@@ -901,6 +920,24 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
                     typer.echo(
                         f"| {entry['type']} | {entry['path']} | {start}-{entry['end']} |"
                     )
+
+    if emit_compress_prompt:
+        task_line = compress_task or "<describe your implementation/debugging objective>"
+        typer.echo(typer.style("\n## 4. COMPRESSION PLANNING PROMPT (for cheap long-context model)", bold=True))
+        typer.echo("Use the template below with Gemini Flash / similar model and apply the returned options in a second akaidoo run.")
+        typer.echo("```text")
+        typer.echo("You are optimizing Akaidoo context for a constrained agentic window.")
+        typer.echo(f"Task: {task_line}")
+        typer.echo("Budget: Keep preloaded context <= 150k tokens (or user target).")
+        typer.echo("Rules:")
+        typer.echo("1) Prefer removing irrelevant modules/files/models first.")
+        typer.echo("2) For large files, prefer additive method selection over prune lists.")
+        typer.echo("3) When selecting a method, include likely same-class callees transitively.")
+        typer.echo("4) Keep critical business flows and traceback paths safe; avoid risky removals.")
+        typer.echo("Return STRICT JSON with keys:")
+        typer.echo('{"exclude_addons": [], "rm_expand": [], "expand_models": [], "expand_methods": [], "notes": ""}')
+        typer.echo("Do not include markdown.")
+        typer.echo("```")
 
 
 def find_pr_commits_after_target(

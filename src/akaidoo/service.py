@@ -44,6 +44,7 @@ class ContextOptions:
     # Shrink and prune modes
     shrink_mode: str = "soft"
     prune_methods_str: Optional[str] = None
+    expand_methods_str: Optional[str] = None
 
     # Model expansion
     expand_models_str: Optional[str] = None
@@ -88,6 +89,7 @@ class AkaidooService:
         no_exclude_addons_str: Optional[str] = None,
         shrink_mode: str = "soft",
         prune_methods_str: Optional[str] = None,
+        expand_methods_str: Optional[str] = None,
         expand_models_str: Optional[str] = None,
         add_expand_str: Optional[str] = None,
         rm_expand_str: Optional[str] = None,
@@ -112,6 +114,7 @@ class AkaidooService:
             no_exclude_addons_str: Addons to force include
             shrink_mode: none, soft, medium, hard, max
             prune_methods_str: Methods to prune (e.g., "Model.method")
+            expand_methods_str: Methods to force expand (e.g., "model.name._method")
             expand_models_str: Models to fully expand
             auto_expand: Auto-expand high-score models
             add_expand_str: Add models to auto-expand set
@@ -139,6 +142,7 @@ class AkaidooService:
             no_exclude_addons_str=no_exclude_addons_str,
             shrink_mode=shrink_mode,
             prune_methods_str=prune_methods_str,
+            expand_methods_str=expand_methods_str,
             expand_models_str=expand_models_str,
             add_expand_str=add_expand_str,
             rm_expand_str=rm_expand_str,
@@ -172,6 +176,7 @@ class AkaidooService:
             no_exclude_addons_str=options.no_exclude_addons_str,
             shrink_mode=options.shrink_mode,
             prune_methods_str=options.prune_methods_str,
+            expand_methods_str=options.expand_methods_str,
             expand_models_str=options.expand_models_str,
             add_expand_str=options.add_expand_str,
             rm_expand_str=options.rm_expand_str,
