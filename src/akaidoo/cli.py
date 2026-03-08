@@ -501,6 +501,22 @@ def akaidoo_command_entrypoint(
         help="Target context size budget (e.g., '100k' for 100k tokens, '50000' for 50000 chars). Akaidoo will auto-escalate shrink modes to fit.",
         show_default=False,
     ),
+    compress_task: Optional[str] = typer.Option(
+        None,
+        "--compress-task",
+        "-T",
+        help="Enable 2-pass compress workflow. Value is a task description (or path to a file containing one). "
+        "Pass 1 dumps full context, an LLM (Gemini Flash by default) recommends filters, "
+        "Pass 2 re-runs with those filters for a 2-3x smaller context.",
+        show_default=False,
+    ),
+    compress_model: Optional[str] = typer.Option(
+        None,
+        "--compress-model",
+        help="LLM model to use for --compress-task (litellm format, e.g. 'gemini/gemini-3.0-flash'). "
+        "Can also be set via AKAIDOO_COMPRESS_MODEL env var.",
+        show_default=False,
+    ),
 ):
     manifestoo_echo_module.verbosity = (
         manifestoo_echo_module.verbosity + verbose_level_count - quiet_level_count
@@ -539,6 +555,99 @@ def akaidoo_command_entrypoint(
         skip_expanded=agent_mode,
         context_budget=budget_chars,
     )
+
+    # --- 2-Pass Compress Workflow ---
+    if compress_task:
+        from .compress import (
+            resolve_task_description,
+            call_compress_llm,
+            merge_compress_options,
+        )
+
+        task_description = resolve_task_description(compress_task)
+
+        # Pass 1: generate the full context dump (like --output, no --agent)
+        service = get_service()
+        pass1_introduction = (
+            f"Akaidoo context dump for compress-for-prompt analysis.\n"
+            f"Addons: {', '.join(sorted(context.selected_addon_names))}\n"
+        )
+        pass1_dump = service.get_context_dump(context, pass1_introduction)
+        pass1_tokens = int(len(pass1_dump) * TOKEN_FACTOR / 1000)
+        echo.info(
+            f"Compress Pass 1: {pass1_tokens}k tokens context generated.",
+            bold=True,
+        )
+
+        # LLM call
+        try:
+            rec = call_compress_llm(
+                task_description=task_description,
+                context_dump=pass1_dump,
+                model=compress_model,
+            )
+        except ImportError as e:
+            echo.error(str(e))
+            raise typer.Exit(1)
+        except Exception as e:
+            echo.error(f"Compress LLM call failed: {e}")
+            raise typer.Exit(1)
+
+        # Report recommendations
+        echo.info(f"Compress: LLM reasoning: {rec.reasoning}", bold=True)
+        if rec.exclude_addons:
+            echo.info(f"  exclude addons: {', '.join(rec.exclude_addons)}")
+        if rec.rm_expand:
+            echo.info(f"  rm-expand models: {', '.join(rec.rm_expand)}")
+        if rec.expand:
+            echo.info(f"  expand models: {', '.join(rec.expand)}")
+        if rec.prune_methods:
+            echo.info(f"  prune methods: {', '.join(rec.prune_methods)}")
+        if rec.shrink:
+            echo.info(f"  shrink level: {rec.shrink}")
+
+        # Merge with user's original options
+        merged = merge_compress_options(
+            rec=rec,
+            original_exclude_str=exclude_addons_str,
+            original_rm_expand_str=rm_expand_str,
+            original_expand_str=expand_models_str,
+            original_prune_methods_str=prune_methods_str,
+            original_shrink_mode=shrink_mode,
+        )
+
+        # Pass 2: re-resolve context with merged options
+        echo.info(
+            "Compress Pass 2: re-resolving context with LLM filters...", bold=True
+        )
+        context = resolve_akaidoo_context(
+            addon_name=addon_name,
+            addons_path_str=addons_path_str,
+            addons_path_from_import_odoo=addons_path_from_import_odoo,
+            addons_path_python=addons_path_python,
+            odoo_cfg=odoo_cfg,
+            odoo_series=odoo_series,
+            openupgrade_path=openupgrade_path,
+            module_diff_path=module_diff_path,
+            migration_commits=migration_commits,
+            include=include,
+            exclude_addons_str=merged["exclude_addons_str"],
+            no_exclude_addons_str=no_exclude_addons_str,
+            shrink_mode=merged["shrink_mode"],
+            expand_models_str=merged["expand_models_str"],
+            add_expand_str=add_expand_str,
+            rm_expand_str=merged["rm_expand_str"],
+            prune_methods_str=merged["prune_methods_str"],
+            skip_expanded=agent_mode,
+            context_budget=budget_chars,
+        )
+        pass2_tokens = int(context.context_size_chars * TOKEN_FACTOR / 1000)
+        reduction = (1 - pass2_tokens / pass1_tokens) * 100 if pass1_tokens > 0 else 0
+        echo.info(
+            f"Compress: {pass1_tokens}k -> {pass2_tokens}k tokens "
+            f"({reduction:.0f}% reduction)",
+            bold=True,
+        )
 
     edit_mode = edit_in_editor
     # Mutual exclusivity check
@@ -842,6 +951,18 @@ This map shows the active scope. "Pruned" modules are hidden to save focus.
             "Conventions: files in the dependency map start with `# FILEPATH: [path]`. "
             "`# shrunk` means method bodies were removed."
         )
+
+        # 0b. Navigation Index (config + addons_path so agents can find files)
+        if context.odoo_cfg_path or context.addons_path_display:
+            typer.echo(typer.style("\n## NAVIGATION INDEX", bold=True))
+            typer.echo(
+                "Use these paths to locate source files when investigating "
+                "stack traces or code not included in this context."
+            )
+            if context.odoo_cfg_path:
+                typer.echo(f"Odoo config: `{context.odoo_cfg_path}`")
+            if context.addons_path_display:
+                typer.echo(f"Addons path: `{context.addons_path_display}`")
 
         # 1. Project Structure (Global Map)
         typer.echo(typer.style("\n## 1. GLOBAL ODOO MODULES DEPENDENCY MAP", bold=True))

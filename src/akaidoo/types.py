@@ -101,3 +101,19 @@ class DiscoveryResult:
     addon_models: Dict[str, Set[str]] = field(default_factory=dict)
     # All model names discovered across all addons
     all_discovered_models: Set[str] = field(default_factory=set)
+
+
+@dataclass
+class CompressRecommendation:
+    """
+    LLM-produced filter recommendations for the 2-pass compress workflow.
+
+    All fields are optional: omitted fields mean "don't change from defaults".
+    """
+
+    reasoning: str = ""
+    exclude_addons: List[str] = field(default_factory=list)
+    rm_expand: List[str] = field(default_factory=list)
+    expand: List[str] = field(default_factory=list)
+    prune_methods: List[str] = field(default_factory=list)
+    shrink: Optional[str] = None
