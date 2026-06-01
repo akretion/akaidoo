@@ -64,6 +64,9 @@ class AkaidooContext:
     effective_shrink_mode: str = "soft"
     budget_escalation_level: int = 0
     context_size_chars: int = 0
+    # Environment info (for agent mode output)
+    odoo_cfg_path: Optional[str] = None
+    addons_path_display: Optional[str] = None
 
 
 def scan_extra_scripts(
@@ -909,6 +912,8 @@ def resolve_akaidoo_context(
         enriched_additions=enriched_additions,
         new_related=new_related,
         effective_shrink_mode=shrink_mode,
+        odoo_cfg_path=str(odoo_cfg) if odoo_cfg else None,
+        addons_path_display=str(m_addons_path) if m_addons_path else None,
     )
 
     # Calculate and store context size

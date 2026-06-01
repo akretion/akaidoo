@@ -55,6 +55,9 @@ mcp = [
     "mcp",
     "fastmcp",
 ]
+compress = [
+    "litellm",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "akaidoo.__version__"}
