@@ -41,6 +41,7 @@ from .scanner import (
 )
 from .shrinker import shrink_manifest
 from .utils import get_model_relations, get_odoo_model_stats
+from .native_methods_index import get_native_methods
 
 
 @dataclass
@@ -285,25 +286,30 @@ def _parse_expansion_options(
     add_expand_str: Optional[str],
     rm_expand_str: Optional[str],
     prune_methods_str: Optional[str],
+    include_methods_str: Optional[str],
+    include_native_model_methods: bool,
     auto_expand: bool,
-) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
+) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
     """
     Parse and validate expansion-related CLI options.
 
     Returns:
         (expand_models_set, focus_models_set, add_expand_set,
-         rm_expand_set, prune_methods_set, auto_expand)
+         rm_expand_set, prune_methods_set, include_methods_set, auto_expand)
     """
     expand_models_set: Set[str] = set()
     focus_models_set: Set[str] = set()
     add_expand_set: Set[str] = set()
     rm_expand_set: Set[str] = set()
     prune_methods_set: Set[str] = set()
+    include_methods_set: Set[str] = set()
 
     if rm_expand_str:
         rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
     if prune_methods_str:
         prune_methods_set = {m.strip() for m in prune_methods_str.split(",")}
+    if include_methods_str:
+        include_methods_set = {m.strip() for m in include_methods_str.split(",")}
 
     if expand_models_str:
         # Explicit mode: disables auto-expand
@@ -321,6 +327,7 @@ def _parse_expansion_options(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        include_methods_set,
         auto_expand,
     )
 
@@ -572,6 +579,8 @@ def resolve_akaidoo_context(
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
     prune_methods_str: Optional[str] = None,
+    include_methods_str: Optional[str] = None,
+    include_native_model_methods: bool = False,
     skip_expanded: bool = False,
     context_budget: Optional[int] = None,
 ) -> AkaidooContext:
@@ -603,12 +612,15 @@ def resolve_akaidoo_context(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        include_methods_set,
         auto_expand,
     ) = _parse_expansion_options(
         expand_models_str,
         add_expand_str,
         rm_expand_str,
         prune_methods_str,
+        include_methods_str,
+        include_native_model_methods,
         True,
     )
 
@@ -761,6 +773,17 @@ def resolve_akaidoo_context(
                 f"{', '.join(sorted(add_expand_set))}"
             )
 
+    # --- Native Methods Inclusion ---
+    if include_native_model_methods and final_odoo_series:
+        odoo_version = str(final_odoo_series)
+        native_methods = get_native_methods(odoo_version)
+        if native_methods:
+            include_methods_set.update(native_methods)
+            if manifestoo_echo_module.verbosity >= 1:
+                echo.info(
+                    f"Added {len(native_methods)} native methods from Odoo {odoo_version}"
+                )
+
     # --- Pass 1: Discovery (Build Model Map and Relations) ---
     pruned_addons: Dict[str, str] = {}
     all_relations, addon_models, all_discovered_models = _discover_model_relations(
@@ -868,6 +891,7 @@ def resolve_akaidoo_context(
                 expand_models_set=expand_models_set,
                 relevant_models=relevant_models,
                 prune_methods=prune_methods_set,
+                include_methods=include_methods_set,
                 skip_expanded=skip_expanded,
             )
             # Merge scan results into the main collections

@@ -681,11 +681,22 @@ def shrink_python_file(
                             "function_definition",
                             "decorated_definition",
                         ):
+                            # Compute method closure for included methods
+                            selected_methods_for_class: Set[str] = set()
+                            for model_name in model_names:
+                                selected_methods_for_class.update(
+                                    include_methods_map.get(model_name, set())
+                                )
+                            expanded_method_names = _compute_method_closure(
+                                node, code_bytes, selected_methods_for_class
+                            )
+
                             process_function(
                                 child,
                                 indent="    ",
                                 context_models=model_names,
                                 override_level=effective_level,
+                                expanded_method_names=expanded_method_names,
                             )
 
                     if effective_level == "max":

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Dict, Set
 
-INDEX_DIR = Path(__file__).resolve().parent.parent / "data" / "native_methods"
+INDEX_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "native_methods"
 
 _cache: Dict[str, Set[str]] = {}
 

@@ -6,8 +6,24 @@ from pathlib import Path
 from typing import Dict, List, Set
 
 
+def _extract_methods_from_ast(tree: ast.AST) -> Set[str]:
+    """Extract public method names from an AST module.
+
+    Includes top-level functions and class methods.
+    """
+    methods: Set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
+            methods.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and not item.name.startswith("_"):
+                    methods.add(item.name)
+    return methods
+
+
 def _python_methods_from_file(path: Path) -> Set[str]:
-    """Extract top-level method names from a Python file using AST."""
+    """Extract public method names from a Python file using AST."""
     if not path.exists():
         return set()
     try:
@@ -18,11 +34,7 @@ def _python_methods_from_file(path: Path) -> Set[str]:
         tree = ast.parse(text)
     except SyntaxError:
         return set()
-    methods: Set[str] = set()
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
-            methods.add(node.name)
-    return methods
+    return _extract_methods_from_ast(tree)
 
 
 def scan_models_py(odoo_root: Path, addon: str) -> Set[str]:

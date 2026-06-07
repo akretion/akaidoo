@@ -483,6 +483,18 @@ def akaidoo_command_entrypoint(
         "-P",
         help="Comma-separated list of methods to force prune (e.g. 'Model.method').",
     ),
+    include_methods_str: Optional[str] = typer.Option(
+        None,
+        "--include-methods",
+        "-I",
+        help="Comma-separated list of methods to force include with transitive closure (e.g. 'Model.method').",
+    ),
+    include_native_model_methods: bool = typer.Option(
+        False,
+        "--include-native-model-methods",
+        help="Include native Odoo model methods (from data/native_methods index) in the output.",
+        show_default=True,
+    ),
     session: bool = typer.Option(
         False,
         "--session",
@@ -537,6 +549,8 @@ def akaidoo_command_entrypoint(
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
         prune_methods_str=prune_methods_str,
+        include_methods_str=include_methods_str,
+        include_native_model_methods=include_native_model_methods,
         skip_expanded=agent_mode,
         context_budget=budget_chars,
     )
