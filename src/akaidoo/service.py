@@ -86,7 +86,7 @@ class AkaidooService:
         include: Optional[str] = None,
         exclude_addons_str: Optional[str] = None,
         no_exclude_addons_str: Optional[str] = None,
-        shrink_mode: str = "soft",
+        compress_mode: str = "soft",
         prune_methods_str: Optional[str] = None,
         expand_models_str: Optional[str] = None,
         add_expand_str: Optional[str] = None,
@@ -110,7 +110,7 @@ class AkaidooService:
             include: Content types to include (view, wizard, data, etc.)
             exclude_addons_str: Addons to exclude
             no_exclude_addons_str: Addons to force include
-            shrink_mode: none, soft, medium, hard, max
+            compress_mode: none, soft, medium, hard, max
             prune_methods_str: Methods to prune (e.g., "Model.method")
             expand_models_str: Models to fully expand
             auto_expand: Auto-expand high-score models
@@ -137,7 +137,7 @@ class AkaidooService:
             include=include,
             exclude_addons_str=exclude_addons_str,
             no_exclude_addons_str=no_exclude_addons_str,
-            shrink_mode=shrink_mode,
+            compress_mode=compress_mode,
             prune_methods_str=prune_methods_str,
             expand_models_str=expand_models_str,
             add_expand_str=add_expand_str,
@@ -170,7 +170,7 @@ class AkaidooService:
             include=options.include,
             exclude_addons_str=options.exclude_addons_str,
             no_exclude_addons_str=options.no_exclude_addons_str,
-            shrink_mode=options.shrink_mode,
+            compress_mode=options.compress_mode,
             prune_methods_str=options.prune_methods_str,
             expand_models_str=options.expand_models_str,
             add_expand_str=options.add_expand_str,
@@ -332,7 +332,7 @@ class AkaidooService:
             "enriched_additions": sorted(context.enriched_additions),
             "related_models": sorted(context.new_related),
             "pruned_addons": list(context.pruned_addons.keys()),
-            "effective_shrink_mode": context.effective_shrink_mode,
+            "effective_compress_mode": context.effective_compress_mode,
             "budget_escalation_level": context.budget_escalation_level,
         }
 

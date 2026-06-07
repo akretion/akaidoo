@@ -427,10 +427,11 @@ def akaidoo_command_entrypoint(
     separator: str = typer.Option(
         "\n", "--separator", help="Separator character between filenames."
     ),
-    shrink_mode: str = typer.Option(
+    compress_mode: str = typer.Option(
         "soft",
+        "--compress",
         "--shrink",
-        help="Shrink effort: none (no shrink), soft (deps shrunk, targets full), medium (relevant deps soft, others hard), hard (targets soft, deps hard), max (max shrink everywhere).",
+        help="Code compression effort: none (full), soft (default), medium, hard, max.",
         case_sensitive=False,
     ),
     rm_expand_str: Optional[str] = typer.Option(
@@ -531,7 +532,7 @@ def akaidoo_command_entrypoint(
         include=include,
         exclude_addons_str=exclude_addons_str,
         no_exclude_addons_str=no_exclude_addons_str,
-        shrink_mode=shrink_mode,
+        compress_mode=compress_mode,
         expand_models_str=expand_models_str,
         add_expand_str=add_expand_str,
         rm_expand_str=rm_expand_str,
@@ -571,10 +572,10 @@ Command: {cmd_call}
 Conventions:
 1. Files start with `# FILEPATH: [path]`.
 2. Some files were filtered out to save tokens; ask for them if you need."""
-        if shrink_mode != "none":
+        if compress_mode != "none":
             introduction += """
 3. `# shrunk` indicates code removed to save tokens; ask for full content if a specific logic flow is unclear."""
-        if shrink_mode == "hard":
+        if compress_mode == "hard":
             introduction += """
 4. Method definitions were eventually entirely skipped to save tokens and focus on the data model only."""
 

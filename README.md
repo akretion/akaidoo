@@ -89,14 +89,14 @@ akaidoo sale_stock -c odoo.conf --rm-expand mail.thread -x
 ### Controlling Context Size
 
 ```bash
-# Set shrink level manually
-akaidoo sale_stock -c odoo.conf --shrink=hard -x
+# Set compression level manually
+akaidoo sale_stock -c odoo.conf --compress=hard -x
 
-# Budget mode - auto-escalate shrink to fit token budget
+# Budget mode - auto-escalate compression to fit token budget
 akaidoo sale_stock -c odoo.conf -B 100k -o context.md
 
-# Max shrink - data model skeleton only
-akaidoo sale_stock -c odoo.conf --shrink=max -x
+# Max compression - data model skeleton only
+akaidoo sale_stock -c odoo.conf --compress=max -x
 ```
 
 ### Advanced Usage
@@ -117,7 +117,7 @@ akaidoo sale_stock -c odoo.conf --prune-methods sale.order._compute_amounts -x
 
 ## Shrink Modes
 
-The `--shrink` option controls how aggressively code is compressed:
+The `--compress/--shrink` option controls how aggressively code is compressed:
 
 | Level                | Target Addons  | Dependency Addons          | Use Case            |
 | :------------------- | :------------- | :------------------------- | :------------------ |
@@ -225,10 +225,10 @@ Retrieves Odoo addon source code with intelligent context optimization.
 ```python
 read_module_source(
     addon="sale_stock",                    # Required
-    shrink_mode="soft",                    # none/soft/medium/hard/max
+    compress_mode="soft",                    # none/soft/medium/hard/max
     expand_models=["sale.order"],          # Explicit mode (disables auto-expand)
     add_expand_models=["stock.move"],      # Additive mode (works with auto-expand)
-    context_budget_tokens=100000,          # Auto-escalate shrink to fit
+    context_budget_tokens=100000,          # Auto-escalate compression to fit
 )
 ```
 
@@ -271,7 +271,7 @@ When running without output flags, akaidoo shows a tree view with:
 
 - Module dependency structure
 - File sizes
-- Per-model shrink indicators with color coding:
+- Per-model compression indicators with color coding:
   - **Red (full)**: Complete code preserved
   - **Yellow (soft)**: Method bodies shrunk
   - **Cyan (hard)**: Only fields and API
