@@ -101,3 +101,27 @@ class DiscoveryResult:
     addon_models: Dict[str, Set[str]] = field(default_factory=dict)
     # All model names discovered across all addons
     all_discovered_models: Set[str] = field(default_factory=set)
+
+
+@dataclass
+class MethodIncludeSpec:
+    """
+    Represents an additive method include request: keep this method and its
+    transitive same-class callees.
+    """
+
+    model: str
+    method: str
+
+    def key(self) -> str:
+        return f"{self.model}.{self.method}"
+
+
+@dataclass
+class MethodClosureResult:
+    """
+    Result of computing the transitive method closure for included methods.
+    """
+
+    includes: Set[str]
+    closure: Set[str]

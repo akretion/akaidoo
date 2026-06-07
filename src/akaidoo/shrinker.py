@@ -6,7 +6,7 @@ import pprint
 from pathlib import Path
 from typing import Optional, Set, List, Dict, Tuple
 from .utils import _get_odoo_model_names_from_body, parser
-from .types import ShrinkResult
+from .types import ShrinkResult, MethodClosureResult, MethodIncludeSpec
 
 
 def shrink_manifest(content: str) -> str:
@@ -203,6 +203,83 @@ def _get_field_info(node, code_bytes: bytes) -> Dict:
     return info
 
 
+def _parse_include_methods(include_methods_str: Optional[str]) -> Set[str]:
+    """
+    Parse `Model.method` selectors into a normalized set of keys.
+    """
+    include_methods = set()
+    if not include_methods_str:
+        return include_methods
+    for item in include_methods_str.split(","):
+        token = item.strip()
+        if not token or "." not in token:
+            continue
+        model_name, method_name = token.rsplit(".", 1)
+        if not model_name or not method_name:
+            continue
+        include_methods.add(f"{model_name}.{method_name}")
+    return include_methods
+
+
+def _collect_called_methods(function_text: str) -> Set[str]:
+    """
+    Extract likely same-class method calls from a function body.
+    """
+    calls = set(re.findall(r"\bself\.([A-Za-z_][A-Za-z0-9_]*)\s*\(", function_text))
+    calls.update(
+        re.findall(r"\b(?:super\(\)\.)([A-Za-z_][A-Za-z0-9_]*)\s*\(", function_text)
+    )
+    return calls
+
+
+def _compute_method_closure(
+    class_node,
+    code_bytes: bytes,
+    seed_methods: Set[str],
+) -> Set[str]:
+    """
+    Expand selected methods transitively through same-class calls.
+    """
+    if not seed_methods:
+        return set()
+
+    body_node = class_node.child_by_field_name("body")
+    if not body_node:
+        return set()
+
+    graph: Dict[str, Set[str]] = {}
+    for child in body_node.children:
+        func_def = None
+        if child.type == "function_definition":
+            func_def = child
+        elif child.type == "decorated_definition":
+            definition = child.child_by_field_name("definition")
+            if definition and definition.type == "function_definition":
+                func_def = definition
+        if not func_def:
+            continue
+
+        name_node = func_def.child_by_field_name("name")
+        if not name_node:
+            continue
+        method_name = code_bytes[name_node.start_byte : name_node.end_byte].decode(
+            "utf-8"
+        )
+        fn_text = code_bytes[child.start_byte : child.end_byte].decode("utf-8")
+        graph[method_name] = _collect_called_methods(fn_text)
+
+    closure = set(seed_methods)
+    stack = list(seed_methods)
+    while stack:
+        current = stack.pop()
+        for called in graph.get(current, set()):
+            if called in graph and called not in closure:
+                closure.add(called)
+                stack.append(called)
+
+    return closure
+
+
 def shrink_python_file(
     path: str,
     aggressive: bool = False,
@@ -212,6 +289,7 @@ def shrink_python_file(
     shrink_level: Optional[str] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_methods: Optional[Set[str]] = None,
+    include_methods: Optional[Set[str]] = None,
     header_path: Optional[str] = None,
     skip_expanded_content: bool = False,
     expanded_shrink_level: Optional[str] = None,
@@ -261,10 +339,19 @@ def shrink_python_file(
     expand_models = expand_models or set()
     relevant_models = relevant_models or set()
     prune_methods = prune_methods or set()
+    include_methods = include_methods or set()
+    include_methods_map: Dict[str, Set[str]] = {}
     actually_expanded_models = set()
     expanded_locations: Dict[str, List[Tuple[int, int, str]]] = {}
     model_shrink_levels: Dict[str, str] = {}  # Track effective shrink level per model
     any_content_skipped = False  # Track if any expanded content was skipped
+
+    # Preparse include_methods into a model -> methods map
+    if include_methods:
+        parsed = _parse_include_methods(",".join(sorted(include_methods)))
+        for key in parsed:
+            model_name, method_name = key.rsplit(".", 1)
+            include_methods_map.setdefault(model_name, set()).add(method_name)
 
     # Pre-scan for Odoo models count
     odoo_models_count = 0
@@ -289,7 +376,8 @@ def shrink_python_file(
         return line.strip()
 
     def process_function(
-        node, indent="", context_models: Set[str] = None, override_level: str = None
+        node, indent="", context_models: Set[str] = None, override_level: str = None,
+        expanded_method_names: Optional[Set[str]] = None,
     ):
         effective_level = override_level if override_level else shrink_level
 
@@ -301,21 +389,28 @@ def shrink_python_file(
             else:
                 return
 
+        func_name = None
+        func_name_node = func_def_node.child_by_field_name("name")
+        if func_name_node:
+            func_name = code_bytes[
+                func_name_node.start_byte : func_name_node.end_byte
+            ].decode("utf-8")
+
         should_prune_specifically = False
-        if context_models:
-            func_name_node = func_def_node.child_by_field_name("name")
-            if func_name_node:
-                func_name = code_bytes[
-                    func_name_node.start_byte : func_name_node.end_byte
-                ].decode("utf-8")
-                for m in context_models:
-                    if f"{m}.{func_name}" in prune_methods:
-                        should_prune_specifically = True
-                        break
+        if context_models and func_name:
+            for m in context_models:
+                if f"{m}.{func_name}" in prune_methods:
+                    should_prune_specifically = True
+                    break
+
+        should_include_specifically = bool(
+            func_name and expanded_method_names and func_name in expanded_method_names
+        )
 
         if (
             effective_level in ("hard", "max", "prune")
             and not should_prune_specifically
+            and not should_include_specifically
         ):
             return
 
@@ -334,7 +429,7 @@ def shrink_python_file(
             shrunken_parts.append(f"{indent}    pass  # pruned by request")
             return
 
-        if effective_level == "soft":
+        if effective_level == "soft" and not should_include_specifically:
             for line in header_text.splitlines():
                 stripped_line = line.strip()
                 if stripped_line:
@@ -586,11 +681,22 @@ def shrink_python_file(
                             "function_definition",
                             "decorated_definition",
                         ):
+                            # Compute method closure for included methods
+                            selected_methods_for_class: Set[str] = set()
+                            for model_name in model_names:
+                                selected_methods_for_class.update(
+                                    include_methods_map.get(model_name, set())
+                                )
+                            expanded_method_names = _compute_method_closure(
+                                node, code_bytes, selected_methods_for_class
+                            )
+
                             process_function(
                                 child,
                                 indent="    ",
                                 context_models=model_names,
                                 override_level=effective_level,
+                                expanded_method_names=expanded_method_names,
                             )
 
                     if effective_level == "max":

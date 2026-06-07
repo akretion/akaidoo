@@ -938,13 +938,13 @@ def test_auto_expand_high_score_model(auto_expand_env):
         "--shrink=soft",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
-        "/tmp/test_auto_expand.txt",
+        "/data/data/com.termux/files/usr/tmp/test_auto_expand.txt",
     ]
     result = _run_cli(args)
     assert result.exit_code == 0
     import os
 
-    os.remove("/tmp/test_auto_expand.txt")
+    os.remove("/data/data/com.termux/files/usr/tmp/test_auto_expand.txt")
 
 
 def test_auto_expand_implies_shrink(auto_expand_env):
@@ -957,13 +957,13 @@ def test_auto_expand_implies_shrink(auto_expand_env):
         "16.0",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
-        "/tmp/test_auto_expand2.txt",
+        "/data/data/com.termux/files/usr/tmp/test_auto_expand2.txt",
     ]
     result = _run_cli(args)
     assert result.exit_code == 0
     import os
 
-    os.remove("/tmp/test_auto_expand2.txt")
+    os.remove("/data/data/com.termux/files/usr/tmp/test_auto_expand2.txt")
 
 
 def test_auto_expand_with_explicit_expand(auto_expand_env):
@@ -978,13 +978,13 @@ def test_auto_expand_with_explicit_expand(auto_expand_env):
         "base.model",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
-        "/tmp/test_auto_expand3.txt",
+        "/data/data/com.termux/files/usr/tmp/test_auto_expand3.txt",
     ]
     result = _run_cli(args)
     assert result.exit_code == 0
     import os
 
-    os.remove("/tmp/test_auto_expand3.txt")
+    os.remove("/data/data/com.termux/files/usr/tmp/test_auto_expand3.txt")
 
 
 def test_auto_expand_low_score_not_expanded(auto_expand_env):
@@ -1015,13 +1015,13 @@ class VeryLowScoreModel(models.Model):
         "16.0",
         "--no-exclude=base,web,web_editor,web_tour,portal,mail,digest,bus,auth_signup,base_setup,http_routing,utm,uom,product",
         "-o",
-        "/tmp/test_auto_expand4.txt",
+        "/data/data/com.termux/files/usr/tmp/test_auto_expand4.txt",
     ]
     result = _run_cli(args)
     assert result.exit_code == 0
     import os
 
-    os.remove("/tmp/test_auto_expand4.txt")
+    os.remove("/data/data/com.termux/files/usr/tmp/test_auto_expand4.txt")
 
 
 @pytest.fixture(scope="module")

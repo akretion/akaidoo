@@ -57,10 +57,11 @@ def scan_addon_files(
     selected_addon_names: Set[str],
     includes: Set[str],
     excluded_addons: Set[str],
-    shrink_mode: str = "none",
+    compress_mode: str = "none",
     expand_models_set: Optional[Set[str]] = None,
     relevant_models: Optional[Set[str]] = None,
     prune_methods: Optional[Set[str]] = None,
+    include_methods: Optional[Set[str]] = None,
     skip_expanded: bool = False,
 ) -> ScanResult:
     """
@@ -234,11 +235,11 @@ def scan_addon_files(
                         found_file.suffix == ".py"
                         and found_file.name != "__manifest__.py"
                     ):
-                        need_models = shrink_mode != "none"
+                        need_models = compress_mode != "none"
                         if need_models:
                             file_models = get_file_odoo_models(abs_file_path)
 
-                    if shrink_mode != "none" and found_file.suffix == ".py":
+                    if compress_mode != "none" and found_file.suffix == ".py":
                         if found_file.name != "__manifest__.py":
                             file_is_expanded = any(
                                 m in expand_models_set for m in file_models
@@ -261,7 +262,7 @@ def scan_addon_files(
                                 else:
                                     category = "D_OTH"
 
-                            effort = shrink_mode.lower()
+                            effort = compress_mode.lower()
                             matrix_row = SHRINK_MATRIX.get(
                                 effort, SHRINK_MATRIX["soft"]
                             )
@@ -287,12 +288,13 @@ def scan_addon_files(
                                 str(found_file),
                                 shrink_level=shrink_level,
                                 expand_models=expand_models_set,
-                                skip_imports=(shrink_mode != "none"),
+                                skip_imports=(compress_mode != "none"),
                                 strip_metadata=(
                                     shrink_level in ("hard", "max", "prune")
                                 ),
                                 relevant_models=relevant_models,
                                 prune_methods=prune_methods,
+                                include_methods=include_methods,
                                 header_path=str(header_path),
                                 skip_expanded_content=skip_expanded,
                                 expanded_shrink_level=expanded_shrink_level,

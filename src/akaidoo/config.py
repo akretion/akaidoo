@@ -98,7 +98,7 @@ MAX_DATA_FILE_SIZE = 20 * 1024
 AGENT_INLINE_THRESHOLD: int = 300
 
 # --- Budget Escalation Levels ---
-# Defines the progression of shrink_mode to try
+# Defines the progression of compress_mode to try
 # when context exceeds budget. Each level is more aggressive than the previous.
 BUDGET_ESCALATION_LEVELS: List[str] = [
     "soft",  # Level 0
@@ -108,9 +108,9 @@ BUDGET_ESCALATION_LEVELS: List[str] = [
 ]
 
 # --- Shrink Matrix ---
-# Defines how aggressively to shrink files based on:
+# Defines how aggressively to compress files based on:
 # - File category (Target vs Dependency, Expanded vs Related vs Other)
-# - Overall shrink effort level
+# - Overall compress effort level
 #
 # Categories:
 #   T_EXP: Target addon, Expanded model

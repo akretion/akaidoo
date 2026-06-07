@@ -22,7 +22,7 @@ _service = get_service()
 @mcp.tool()
 def read_module_source(
     addon: str,
-    shrink_mode: str = "soft",
+    compress_mode: str = "soft",
     expand_models: Optional[List[str]] = None,
     add_expand_models: Optional[List[str]] = None,
     context_budget_tokens: Optional[int] = None,
@@ -33,7 +33,7 @@ def read_module_source(
     QUICK START: Just provide the `addon` name - akaidoo handles the rest with smart defaults.
 
     OPTIONS:
-    - `shrink_mode`: Controls code compression (default: "soft")
+    - `compress_mode`: Controls code compression (default: "soft")
       - "none": Full code, no shrinking
       - "soft": Shrink dependencies only (recommended for most tasks)
       - "medium": More aggressive shrinking
@@ -47,13 +47,13 @@ def read_module_source(
       Use when you need more detail on related models, e.g., ["stock.picking"]
 
     - `context_budget_tokens`: Target context size (e.g., 100000)
-      Akaidoo auto-escalates shrink modes to fit within budget
+      Akaidoo auto-escalates compress modes to fit within budget
 
     STRATEGY GUIDE:
     1. **General exploration**: Just provide addon name with defaults
     2. **Debugging traceback**: Use expand_models=["the.failing.model"]
     3. **Need more context on a model**: Use add_expand_models=["related.model"]
-    4. **Context too large**: Use context_budget_tokens or increase shrink_mode
+    4. **Context too large**: Use context_budget_tokens or increase compress_mode
     """
     # Convert token budget to character budget
     budget_chars = None
@@ -62,7 +62,7 @@ def read_module_source(
 
     context = _service.resolve_context(
         addon,
-        shrink_mode=shrink_mode,
+        compress_mode=compress_mode,
         expand_models_str=",".join(expand_models) if expand_models else None,
         add_expand_str=",".join(add_expand_models) if add_expand_models else None,
         context_budget=budget_chars,
@@ -101,7 +101,7 @@ def get_context_summary(addon: str) -> dict:
         - total_files: Number of files in context
         - total_tokens: Estimated token count
         - expand_models: Models that will be fully expanded
-        - effective_shrink_mode: Applied shrink level
+        - effective_compress_mode: Applied compression level
         - And more...
     """
     context = _service.resolve_context(addon)

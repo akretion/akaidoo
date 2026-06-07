@@ -41,6 +41,7 @@ from .scanner import (
 )
 from .shrinker import shrink_manifest
 from .utils import get_model_relations, get_odoo_model_stats
+from .native_methods_index import get_native_methods
 
 
 @dataclass
@@ -61,7 +62,7 @@ class AkaidooContext:
     enriched_additions: Set[str] = field(default_factory=set)
     new_related: Set[str] = field(default_factory=set)
     # Budget enforcement tracking
-    effective_shrink_mode: str = "soft"
+    effective_compress_mode: str = "soft"
     budget_escalation_level: int = 0
     context_size_chars: int = 0
 
@@ -285,25 +286,30 @@ def _parse_expansion_options(
     add_expand_str: Optional[str],
     rm_expand_str: Optional[str],
     prune_methods_str: Optional[str],
+    include_methods_str: Optional[str],
+    include_native_model_methods: bool,
     auto_expand: bool,
-) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
+) -> tuple[Set[str], Set[str], Set[str], Set[str], Set[str], Set[str], bool]:
     """
     Parse and validate expansion-related CLI options.
 
     Returns:
         (expand_models_set, focus_models_set, add_expand_set,
-         rm_expand_set, prune_methods_set, auto_expand)
+         rm_expand_set, prune_methods_set, include_methods_set, auto_expand)
     """
     expand_models_set: Set[str] = set()
     focus_models_set: Set[str] = set()
     add_expand_set: Set[str] = set()
     rm_expand_set: Set[str] = set()
     prune_methods_set: Set[str] = set()
+    include_methods_set: Set[str] = set()
 
     if rm_expand_str:
         rm_expand_set = {m.strip() for m in rm_expand_str.split(",")}
     if prune_methods_str:
         prune_methods_set = {m.strip() for m in prune_methods_str.split(",")}
+    if include_methods_str:
+        include_methods_set = {m.strip() for m in include_methods_str.split(",")}
 
     if expand_models_str:
         # Explicit mode: disables auto-expand
@@ -321,6 +327,7 @@ def _parse_expansion_options(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        include_methods_set,
         auto_expand,
     )
 
@@ -567,11 +574,13 @@ def resolve_akaidoo_context(
     include: Optional[str] = None,
     exclude_addons_str: Optional[str] = None,
     no_exclude_addons_str: Optional[str] = None,
-    shrink_mode: str = "none",
+    compress_mode: str = "none",
     expand_models_str: Optional[str] = None,
     add_expand_str: Optional[str] = None,
     rm_expand_str: Optional[str] = None,
     prune_methods_str: Optional[str] = None,
+    include_methods_str: Optional[str] = None,
+    include_native_model_methods: bool = False,
     skip_expanded: bool = False,
     context_budget: Optional[int] = None,
 ) -> AkaidooContext:
@@ -603,12 +612,15 @@ def resolve_akaidoo_context(
         add_expand_set,
         rm_expand_set,
         prune_methods_set,
+        include_methods_set,
         auto_expand,
     ) = _parse_expansion_options(
         expand_models_str,
         add_expand_str,
         rm_expand_str,
         prune_methods_str,
+        include_methods_str,
+        include_native_model_methods,
         True,
     )
 
@@ -761,6 +773,17 @@ def resolve_akaidoo_context(
                 f"{', '.join(sorted(add_expand_set))}"
             )
 
+    # --- Native Methods Inclusion ---
+    if include_native_model_methods and final_odoo_series:
+        odoo_version = str(final_odoo_series)
+        native_methods = get_native_methods(odoo_version)
+        if native_methods:
+            include_methods_set.update(native_methods)
+            if manifestoo_echo_module.verbosity >= 1:
+                echo.info(
+                    f"Added {len(native_methods)} native methods from Odoo {odoo_version}"
+                )
+
     # --- Pass 1: Discovery (Build Model Map and Relations) ---
     pruned_addons: Dict[str, str] = {}
     all_relations, addon_models, all_discovered_models = _discover_model_relations(
@@ -822,14 +845,14 @@ def resolve_akaidoo_context(
 
                 # Shrink manifest for dependencies
                 is_dependency = addon_to_scan_name not in selected_addon_names
-                if is_dependency and shrink_mode != "none":
+                if is_dependency and compress_mode != "none":
                     try:
                         content = manifest_path.read_text(encoding="utf-8")
-                        shrunken = shrink_manifest(content)
-                        shrunken_files_content[manifest_path.resolve()] = shrunken
+                        shrunk = shrink_manifest(content)
+                        shrunken_files_content[manifest_path.resolve()] = shrunk
                     except Exception as e:
                         echo.warning(
-                            f"Failed to shrink manifest for {addon_to_scan_name}: {e}"
+                            f"Failed to compress manifest for {addon_to_scan_name}: {e}"
                         )
 
                 if migration_commits and not str(addon_dir).endswith(
@@ -864,10 +887,11 @@ def resolve_akaidoo_context(
                 selected_addon_names=selected_addon_names,
                 includes=includes,
                 excluded_addons=set(),
-                shrink_mode=shrink_mode,
+                compress_mode=compress_mode,
                 expand_models_set=expand_models_set,
                 relevant_models=relevant_models,
                 prune_methods=prune_methods_set,
+                include_methods=include_methods_set,
                 skip_expanded=skip_expanded,
             )
             # Merge scan results into the main collections
@@ -908,7 +932,7 @@ def resolve_akaidoo_context(
         diffs=diffs,
         enriched_additions=enriched_additions,
         new_related=new_related,
-        effective_shrink_mode=shrink_mode,
+        effective_compress_mode=compress_mode,
     )
 
     # Calculate and store context size
@@ -921,7 +945,7 @@ def resolve_akaidoo_context(
         # Find current escalation level
         current_level = 0
         try:
-            current_level = BUDGET_ESCALATION_LEVELS.index(shrink_mode)
+            current_level = BUDGET_ESCALATION_LEVELS.index(compress_mode)
         except ValueError:
             # If current mode is not in levels (e.g. "none"), start from beginning if we need to escalate
             pass
@@ -938,7 +962,7 @@ def resolve_akaidoo_context(
             current_tokens = int(context.context_size_chars * TOKEN_FACTOR / 1000)
             echo.info(
                 f"Context size {current_tokens}k tokens exceeds budget {budget_tokens}k. "
-                f"Escalating to shrink={next_shrink}..."
+                f"Escalating to compression={next_shrink}..."
             )
 
             # Recursively rebuild with new modes (without budget to avoid infinite loop)
@@ -955,7 +979,7 @@ def resolve_akaidoo_context(
                 include=include,
                 exclude_addons_str=exclude_addons_str,
                 no_exclude_addons_str=no_exclude_addons_str,
-                shrink_mode=next_shrink,
+                compress_mode=next_shrink,
                 expand_models_str=expand_models_str,
                 add_expand_str=add_expand_str,
                 rm_expand_str=rm_expand_str,
@@ -965,7 +989,7 @@ def resolve_akaidoo_context(
             )
             context.context_size_chars = calculate_context_size(context, skip_expanded)
             context.budget_escalation_level = current_level
-            context.effective_shrink_mode = next_shrink
+            context.effective_compress_mode = next_shrink
 
         # Report final status
         final_tokens = int(context.context_size_chars * TOKEN_FACTOR / 1000)
@@ -973,13 +997,13 @@ def resolve_akaidoo_context(
         if context.context_size_chars <= context_budget:
             echo.info(
                 f"Budget met: {final_tokens}k tokens <= {budget_tokens}k budget "
-                f"(shrink={context.effective_shrink_mode})",
+                f"(compress={context.effective_compress_mode})",
                 bold=True,
             )
         else:
             echo.warning(
                 f"Could not meet budget: {final_tokens}k tokens > {budget_tokens}k budget "
-                f"even at maximum escalation (shrink={context.effective_shrink_mode})"
+                f"even at maximum escalation (compress={context.effective_compress_mode})"
             )
 
     return context
@@ -1047,7 +1071,7 @@ def calculate_context_size(
 
     # If include_expanded_files, calculate the size of expanded model locations
     # that the LLM will need to read separately.
-    # BUT only if content was actually skipped (expanded_shrink_level == "none")
+    # BUT only if content was actually skipped (expanded_compress_level == "none")
     # Otherwise, the shrunk content is already included in the dump.
     if include_expanded_files:
         # Check if any files actually had content skipped
